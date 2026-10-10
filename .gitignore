@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Không đưa dữ liệu thật của công ty lên repo công khai
+*.xlsx
+*.xls
+sample/
+docs/sample-output/
