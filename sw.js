@@ -1,11 +1,12 @@
 // Service worker: lưu toàn bộ app trên máy để chạy không cần mạng.
-const CACHE = 'kiem-kho-v1.2.0';
+const CACHE = 'kiem-kho-v1.3.0';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/xlsx.full.min.js', 'vendor/pdfmake.min.js', 'vendor/vfs_fonts.js', 'vendor/msal-browser.min.js',
+  'vendor/pdf.min.js', 'vendor/pdf.worker.min.js',
   'js/config.js', 'js/tcvn3.js', 'js/util.js', 'js/db.js', 'js/importer.js', 'js/auth.js',
-  'js/onedrive.js', 'js/signature.js', 'js/reports.js', 'js/app.js'
+  'js/onedrive.js', 'js/signature.js', 'js/stamp.js', 'js/viewer.js', 'js/reports.js', 'js/app.js'
 ];
 
 self.addEventListener('install', e => {

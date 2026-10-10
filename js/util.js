@@ -59,24 +59,38 @@ const Util = (function () {
     return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  function canShareFile(blob, name) {
+    try { return !!(navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: blob.type })] })); } catch (e) { return false; }
+  }
+
+  // Phải gọi ngay trong lần bấm nút (không chờ tạo file trước), nếu không điện thoại sẽ chặn
   function download(blob, name) {
+    // iPhone khi mở app từ màn hình chính không tải file trực tiếp được: dùng bảng Chia sẻ > Lưu vào Tệp
+    if (isIOS && canShareFile(blob, name)) return share(blob, name);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    return Promise.resolve(true);
+  }
+
+  function share(blob, name) {
+    if (canShareFile(blob, name)) {
+      return navigator.share({ files: [new File([blob], name, { type: blob.type })], title: name })
+        .then(() => true)
+        .catch(e => { if (e.name !== 'AbortError') throw new Error('Không chia sẻ được: ' + e.message); return false; });
+    }
+    // Loại file này điện thoại không cho chia sẻ trực tiếp (ví dụ Excel trên Android): tải về rồi gửi từ thư mục Tải xuống
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  }
-
-  async function share(blob, name) {
-    const file = new File([blob], name, { type: blob.type });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: name });
-      return true;
-    }
-    download(blob, name);
-    return false;
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    return Promise.resolve(false);
   }
 
   const safeName = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w.-]+/g, '_');
 
-  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, compressImage, sha256, download, share, safeName };
+  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, compressImage, sha256, download, share, safeName, isIOS };
 })();

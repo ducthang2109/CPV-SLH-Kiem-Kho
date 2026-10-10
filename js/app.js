@@ -94,9 +94,13 @@
       ${cfg.factories.map(f => {
         const ds = datasets.find(d => d.id === f.code);
         const open = sessions.filter(s => s.factory.code === f.code && s.status !== 'done');
+        // Dữ liệu không tự cập nhật: nhắc tải lại khi file không phải của hôm nay
+        const fileDay = ds && (ds.fileDate || ds.importedAt) ? Util.isoDate(new Date(ds.fileDate || ds.importedAt)) : null;
+        const stale = ds && fileDay !== Util.today();
         return `<div class="card">
           <div class="row between"><h3>${E(f.name)}</h3><span class="tag">${E(f.code)}</span></div>
-          <p class="muted small">${ds ? `Dữ liệu: ${E(ds.fileName)} · ${ds.items.length} dòng · tải lúc ${Util.vnDateTime(ds.importedAt)}` : 'Chưa có dữ liệu tồn kho trên máy'}</p>
+          <p class="muted small">${ds ? `Dữ liệu: ${E(ds.fileName)} · ${ds.items.length} dòng · ${ds.fileDate ? 'file cập nhật' : 'tải'} lúc ${Util.vnDateTime(ds.fileDate || ds.importedAt)}` : 'Chưa có dữ liệu tồn kho trên máy'}</p>
+          ${stale ? '<p class="small warnc-text">Dữ liệu không phải của hôm nay. Nếu có file mới, bấm "Tải lại dữ liệu".</p>' : ''}
           ${open.map(s => `<button class="btn block warn" data-open="${s.id}">Tiếp tục phiên ${Util.vnDate(s.countDate)} · ${s.items.filter(i => i.actualQty != null).length}/${s.items.length} dòng</button>`).join('')}
           <div class="row gap">
             <button class="btn" data-import="${E(f.code)}">${ds ? 'Tải lại dữ liệu' : 'Tải dữ liệu'}</button>
@@ -123,30 +127,43 @@
     setTitle('Tải dữ liệu · ' + f.name, '#factories');
     const ms = Auth.useMicrosoft();
     view().innerHTML = `
+      ${ms ? `<div class="card">
+        <h3>Tự tìm trên OneDrive</h3>
+        <p class="muted small">Thư mục: ${E(Config.get().oneDrive.inputFolder)} · mẫu tên file: ${E(f.inputFile || '*.xlsx')}</p>
+        <button class="btn primary block" id="od">Tìm và tải file từ OneDrive</button>
+        <div id="odList"></div>
+      </div>` : ''}
       <div class="card">
-        <h3>Từ OneDrive</h3>
-        ${ms ? `<p class="muted small">Thư mục: ${E(Config.get().oneDrive.inputFolder)} · mẫu tên file: ${E(f.inputFile || '*.xlsx')}</p>
-          <button class="btn primary block" id="od">Tìm và tải file từ OneDrive</button>
-          <div id="odList"></div>` :
-          `<p class="muted small">Chưa cấu hình đăng nhập Microsoft. Bạn vẫn có thể mở file từ app OneDrive trên điện thoại bằng nút bên dưới.</p>`}
+        <h3>Lấy file qua app OneDrive trên điện thoại</h3>
+        <p class="muted small">Không cần IT cài đặt gì. Điện thoại cần có app OneDrive đã đăng nhập tài khoản công ty. File chỉ lấy khi bạn bấm, không tự cập nhật.</p>
+        <ul class="small steps">
+          <li><b>Android:</b> bấm nút dưới → bấm ☰ (góc trái) → chọn <b>OneDrive</b> → Apps Kiem Kho → Input → chọn file ${E(f.inputFile || '')}.</li>
+          <li><b>iPhone:</b> bấm nút dưới → <b>Chọn tệp</b> → Duyệt → <b>OneDrive</b> → Apps Kiem Kho → Input → chọn file.</li>
+          <li>Không thấy OneDrive trong danh sách: mở app OneDrive, bấm ⋯ ở file → <b>Tải xuống</b> (Android) hoặc <b>Lưu vào Tệp</b> (iPhone), rồi chọn file vừa lưu.</li>
+        </ul>
+        <label class="btn ${ms ? '' : 'primary'} block">Chọn file Excel<input type="file" id="file" hidden accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></label>
       </div>
-      <div class="card">
-        <h3>Từ file trên máy / app OneDrive</h3>
-        <input type="file" id="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">      </div>
       <div id="preview"></div>`;
 
-    const load = (buf, name) => guard(async () => {
+    const load = (buf, name, fileDate) => guard(async () => {
       const ds = Importer.parse(buf, name);
       ds.id = code;
+      ds.fileDate = fileDate || null;
       await DB.put('datasets', ds);
       showPreview(ds, f);
     }, 'Đang đọc file...');
 
-    $('#file').onchange = async e => { const file = e.target.files[0]; if (file) load(await file.arrayBuffer(), file.name); };
+    $('#file').onchange = async e => {
+      const file = e.target.files[0];
+      if (file) load(await file.arrayBuffer(), file.name, file.lastModified ? new Date(file.lastModified).toISOString() : null);
+    };
     if ($('#od')) $('#od').onclick = () => guard(async () => {
       const { match, all } = await OneDrive.findInputFile(f);
       $('#odList').innerHTML = all.map(x => `<button class="btn block ${match && x.name === match.name ? 'primary' : ''}" data-f="${E(x.name)}">${E(x.name)} <span class="small">· ${Util.vnDateTime(x.lastModifiedDateTime)}</span></button>`).join('') || '<p class="muted">Không thấy file Excel trong thư mục.</p>';
-      $$('#odList [data-f]').forEach(b => b.onclick = () => guard(async () => load(await OneDrive.download(Config.get().oneDrive.inputFolder, b.dataset.f), b.dataset.f), 'Đang tải từ OneDrive...'));
+      $$('#odList [data-f]').forEach(b => b.onclick = () => guard(async () => {
+        const meta = all.find(x => x.name === b.dataset.f);
+        load(await OneDrive.download(Config.get().oneDrive.inputFolder, b.dataset.f), b.dataset.f, meta && meta.lastModifiedDateTime);
+      }, 'Đang tải từ OneDrive...'));
       if (match) toast('Tìm thấy ' + match.name);
     }, 'Đang tìm file trên OneDrive...');
   }
@@ -158,6 +175,7 @@
       <div class="card ok-card">
         <h3>Đã tải ${ds.items.length} dòng</h3>
         <p class="small">File: ${E(ds.fileName)} · Bảng mã: ${ds.encoding}${ds.encoding === 'TCVN3' ? ' (đã chuyển sang Unicode)' : ''}</p>
+        ${ds.fileDate ? `<p class="small ${Util.isoDate(new Date(ds.fileDate)) === Util.today() ? '' : 'warnc-text'}">File cập nhật lúc ${Util.vnDateTime(ds.fileDate)}${Util.isoDate(new Date(ds.fileDate)) === Util.today() ? '' : ' (không phải hôm nay, kiểm tra lại có đúng file mới nhất không)'}</p>` : ''}
         ${ds.sites.length ? `<p class="small">Đơn vị trong file: ${ds.sites.map(E).join('; ')}</p>` : ''}
         <ul class="small">${Object.entries(wh).map(([k, v]) => `<li>${E(k)}: ${v} dòng</li>`).join('')}</ul>
         <p class="small muted">Dữ liệu đã lưu trên máy, có thể kiểm kê không cần mạng.</p>
@@ -177,7 +195,8 @@
     if (me && !me.name) me.name = user.name;
     const s = {
       id: Util.uid(),
-      factory: { code: f.code, name: f.name, address: f.address || '' },
+      factory: { code: f.code, name: f.name, address: f.address || '', lat: f.lat, lng: f.lng },
+      checkIn: null, checkOut: null,
       companyName: cfg.companyName,
       user: { email: user.email, name: user.name },
       countDate: Util.today(),
@@ -206,6 +225,8 @@
     const s = await loadSession(id);
     if (!s) return go('#factories');
     if (s.status === 'done') return go('#done/' + id);
+    // Bước đầu tiên: chụp ảnh xác nhận kế toán có mặt tại nhà máy
+    if (!s.checkIn) return renderCheckIn(s);
     // Ngày kiểm kê luôn là ngày hiện tại khi đang kiểm
     if (s.countDate !== Util.today()) { s.countDate = Util.today(); scheduleSave(); }
     setTitle(s.factory.name, '#factories');
@@ -235,6 +256,58 @@
     $('#add').onclick = () => addExtra(s);
     $('#review').onclick = () => go('#review/' + s.id);
     drawList();
+  }
+
+  // ---------- ảnh xác nhận có mặt (bắt đầu / kết thúc) ----------
+  function geoStatus(el, s) {
+    el.innerHTML = '<span class="muted">Đang lấy vị trí GPS...</span>';
+    Geo.get().then(g => {
+      let txt = g.error ? `<span class="short">${E(g.error)}</span> · bật Vị trí (GPS) và cho phép app dùng vị trí` : `Vị trí: <b>${E(Geo.fmt(g))}</b>`;
+      if (!g.error && s.factory.lat != null && s.factory.lng != null && s.factory.lat !== '') {
+        const d = Geo.distance(g, { lat: Number(s.factory.lat), lng: Number(s.factory.lng) });
+        txt += ` · cách nhà máy <b class="${d > 1000 ? 'short' : 'okc'}">${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'}</b>`;
+      }
+      el.innerHTML = txt;
+    });
+  }
+
+  function presenceCard(p) {
+    if (!p) return '';
+    return `<div class="presence"><img src="${p.data}" alt="ảnh xác nhận"><div class="small">
+      ${E(Stamp.dt(new Date(p.time)))}<br>${E(Geo.fmt(p.geo))}</div></div>`;
+  }
+
+  async function takePresence(file, s, kind) {
+    const user = Auth.currentUser();
+    const title = (kind === 'in' ? 'BẮT ĐẦU KIỂM KÊ' : 'KẾT THÚC KIỂM KÊ') + ' · ' + user.name;
+    return Stamp.photo(file, s.factory, { title, maxSize: 1280 });
+  }
+
+  function renderCheckIn(s) {
+    setTitle('Bắt đầu kiểm kê', '#factories');
+    view().innerHTML = `
+      <div class="card">
+        <h3>Bước 1: Chụp ảnh xác nhận có mặt</h3>
+        <p class="small">Kế toán chụp ảnh của mình tại ${E(s.factory.name)}. App tự in lên ảnh: ngày giờ, tên nhà máy, địa chỉ, vĩ độ / kinh độ. Giờ chụp ảnh này là <b>giờ bắt đầu kiểm kê</b>.</p>
+        <p class="small" id="gps"></p>
+        <label class="btn primary block">📷 Chụp ảnh bắt đầu<input type="file" accept="image/*" capture="user" id="ci" hidden></label>
+        <p class="muted small">Muốn chụp bằng camera sau thì đổi camera trong màn hình chụp.</p>
+      </div>`;
+    geoStatus($('#gps'), s);
+    $('#ci').onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      guard(async () => {
+        const p = await takePresence(file, s, 'in');
+        s.checkIn = p;
+        s.startedAt = p.time;
+        s.countDate = Util.isoDate(new Date(p.time));
+        await DB.put('sessions', s);
+        if (p.geo && p.geo.error) toast('Ảnh đã lưu nhưng không có vị trí GPS: ' + p.geo.error, 'err');
+        else toast('Đã ghi nhận giờ bắt đầu ' + Stamp.dt(new Date(p.time)));
+        renderCount(s.id);
+      }, 'Đang lấy vị trí và đóng dấu ảnh...');
+    };
   }
 
   function signedWarning(s) {
@@ -346,9 +419,13 @@
     el.querySelector('.photo').onchange = async e => {
       const files = [...e.target.files];
       await guard(async () => {
-        for (const f of files) it.photos.push(await Util.compressImage(f));
+        const geo = await Geo.get();
+        for (const f of files) {
+          const p = await Stamp.photo(f, s.factory, { geo, extra: `Hàng: ${it.code} - ${it.name} - Lô ${it.lot}` });
+          it.photos.push(p.data);
+        }
         await DB.put('sessions', s);
-      }, 'Đang lưu ảnh...');
+      }, 'Đang lấy vị trí và đóng dấu ảnh...');
       el.outerHTML = itemCard(it, s);
       bindItem($(`#list .item[data-id="${it.id}"]`), s);
     };
@@ -448,6 +525,24 @@
       </div>
 
       <div class="card">
+        <h3>Ảnh bắt đầu / kết thúc kiểm kê</h3>
+        <p class="small">Bắt đầu:</p>
+        ${presenceCard(s.checkIn) || '<p class="muted small">Chưa có</p>'}
+        <p class="small">Kết thúc: ${s.checkOut ? '' : '<span class="short">chưa chụp, bắt buộc trước khi kết thúc</span>'}</p>
+        ${presenceCard(s.checkOut)}
+        <p class="small" id="gps"></p>
+        <label class="btn ${s.checkOut ? '' : 'primary'} block">📷 ${s.checkOut ? 'Chụp lại ảnh kết thúc' : 'Chụp ảnh kết thúc'}<input type="file" accept="image/*" capture="user" id="co" hidden></label>
+      </div>
+
+      <div class="card">
+        <h3>Xem trước</h3>
+        <div class="row gap">
+          <button class="btn small-btn" id="pv1">Biên bản kiểm kê</button>
+          <button class="btn small-btn" id="pv2">Báo cáo đi kiểm kê</button>
+        </div>
+      </div>
+
+      <div class="card">
         <h3>Ban kiểm kê ký xác nhận</h3>
         <div id="committee"></div>
         <button class="btn small-btn" id="addm">+ Thêm thành viên</button>
@@ -487,13 +582,38 @@
     };
     $('#gph').onchange = async e => {
       const files = [...e.target.files];
-      await guard(async () => { for (const f of files) s.generalPhotos.push({ data: await Util.compressImage(f), caption: '' }); await DB.put('sessions', s); }, 'Đang lưu ảnh...');
+      await guard(async () => {
+        const geo = await Geo.get();
+        for (const f of files) {
+          const p = await Stamp.photo(f, s.factory, { geo });
+          s.generalPhotos.push({ data: p.data, caption: '', time: p.time, geo: p.geo });
+        }
+        await DB.put('sessions', s);
+      }, 'Đang lấy vị trí và đóng dấu ảnh...');
       renderReview(id);
     };
     $$('[data-grm]').forEach(b => b.onclick = () => { s.generalPhotos.splice(Number(b.dataset.grm), 1); scheduleSave(); renderReview(id); });
     $('#addm').onclick = () => { s.committee.push({ role: 'Ủy viên', title: '', name: '', signature: null }); scheduleSave(); drawCommittee(s); };
     bindSig('rep', () => s.reporterSignature, v => { s.reporterSignature = v; });
     drawCommittee(s);
+    geoStatus($('#gps'), s);
+    $('#co').onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      guard(async () => {
+        s.checkOut = await takePresence(file, s, 'out');
+        await DB.put('sessions', s);
+        if (s.checkOut.geo && s.checkOut.geo.error) toast('Ảnh đã lưu nhưng không có vị trí GPS: ' + s.checkOut.geo.error, 'err');
+        renderReview(id);
+      }, 'Đang lấy vị trí và đóng dấu ảnh...');
+    };
+    const preview = (doc, title) => guard(async () => {
+      await DB.put('sessions', s);
+      const blob = await Reports.toBlob(doc());
+      Viewer.open(blob, title + ' (bản nháp)');
+    }, 'Đang tạo bản xem trước...');
+    $('#pv1').onclick = () => preview(() => Reports.inventoryDoc(s, true), 'Biên bản kiểm kê');
+    $('#pv2').onclick = () => preview(() => Reports.tripDoc(s), 'Báo cáo đi kiểm kê');
     $('#finish').onclick = () => finish(s);
   }
 
@@ -539,6 +659,11 @@
   }
 
   async function finish(s) {
+    if (!s.checkOut) {
+      toast('Chụp ảnh kết thúc kiểm kê trước khi kết thúc', 'err');
+      $('#co').closest('.card').scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
     const members = s.committee.filter(m => m.name.trim());
     if (!members.length) return toast('Nhập tên ít nhất một thành viên ban kiểm kê', 'err');
     const unsigned = members.filter(m => !m.signature).map(m => m.name);
@@ -554,6 +679,8 @@
     await DB.put('sessions', s);
     await guard(async () => {
       const files = await buildFiles(s);
+      // Lưu sẵn file để các nút Xem / Tải về / Chia sẻ chạy ngay khi bấm
+      await DB.put('files', { id: s.id, files });
       if (Auth.useMicrosoft()) {
         // Bản biên bản trống chữ ký + báo cáo + Excel trả về thư mục Output để ký thêm bên ngoài
         for (const k of ['unsigned', 'signed', 'trip', 'excel']) await DB.put('outbox', { id: Util.uid(), name: files[k].name, folder: Config.get().oneDrive.outputFolder, blob: files[k].blob, createdAt: Date.now() });
@@ -599,20 +726,28 @@
             ${ms ? `<button class="btn small-btn" data-up="${k}">Gửi OneDrive</button>` : ''}
           </div>
         </div>`).join('')}
+      <p class="muted small">${Util.isIOS ? 'iPhone: nút Tải về mở bảng Chia sẻ, chọn "Lưu vào Tệp" để lưu file.' : 'File tải về nằm trong thư mục Tải xuống (Download) của điện thoại.'}</p>
       <button class="btn block" id="reopen">Mở lại để sửa (xóa chữ ký)</button>`;
 
-    let files = null;
-    const get = async k => { if (!files) files = await buildFiles(s); return files[k]; };
-    $$('[data-view]').forEach(b => b.onclick = () => guard(async () => {
-      const f = await get(b.dataset.view);
-      const url = URL.createObjectURL(f.blob);
-      const w = window.open(url, '_blank');
-      if (!w) Util.download(f.blob, f.name);
-    }, 'Đang tạo PDF...'));
-    $$('[data-dl]').forEach(b => b.onclick = () => guard(async () => { const f = await get(b.dataset.dl); Util.download(f.blob, f.name); }, 'Đang tạo file...'));
-    $$('[data-share]').forEach(b => b.onclick = () => guard(async () => { const f = await get(b.dataset.share); await Util.share(f.blob, f.name); }, 'Đang tạo file...'));
+    // File được tạo sẵn (lúc kết thúc hoặc ngay khi mở màn hình này) và giữ trong bộ nhớ,
+    // vì điện thoại chỉ cho tải/chia sẻ khi lệnh chạy ngay trong lần bấm.
+    let files = (await DB.get('files', s.id) || {}).files;
+    if (!files) {
+      busy(true, 'Đang tạo file...');
+      try { files = await buildFiles(s); await DB.put('files', { id: s.id, files }); } catch (e) { toast(e.message, 'err'); } finally { busy(false); }
+    }
+    if (!files) return;
+    const act = (fn) => { try { const p = fn(); if (p && p.catch) p.catch(e => toast(e.message, 'err')); } catch (e) { toast(e.message, 'err'); } };
+    const doDownload = f => act(() => Util.download(f.blob, f.name));
+    const doShare = f => act(() => Util.share(f.blob, f.name));
+    $$('[data-view]').forEach(b => b.onclick = () => {
+      const f = files[b.dataset.view];
+      Viewer.open(f.blob, f.name, [{ label: 'Tải về', run: () => doDownload(f) }, { label: 'Chia sẻ', run: () => doShare(f) }]);
+    });
+    $$('[data-dl]').forEach(b => b.onclick = () => doDownload(files[b.dataset.dl]));
+    $$('[data-share]').forEach(b => b.onclick = () => doShare(files[b.dataset.share]));
     $$('[data-up]').forEach(b => b.onclick = () => guard(async () => {
-      const f = await get(b.dataset.up);
+      const f = files[b.dataset.up];
       const r = await OneDrive.queueUpload(f.name, f.blob);
       toast(r.sent ? 'Đã gửi lên OneDrive/Output' : 'Đã xếp hàng, sẽ gửi khi có mạng');
       refreshNet();
@@ -621,7 +756,7 @@
       if (!confirm('Mở lại phiên kiểm kê? Toàn bộ chữ ký sẽ bị xóa.')) return;
       s.status = 'counting'; s.finishedAt = null;
       s.committee.forEach(c => { c.signature = null; }); s.reporterSignature = null;
-      await DB.put('sessions', s); go('#review/' + s.id);
+      await DB.put('sessions', s); await DB.del('files', s.id); go('#review/' + s.id);
     };
   }
 
@@ -674,10 +809,21 @@
       <p class="muted small center">Phiên bản ${window.APP_VERSION}</p>`;
 
     $('#addf').onclick = () => $('#facs').insertAdjacentHTML('beforeend', facRow({ code: '', name: '', address: '', inputFile: '' }));
-    $('#facs').onclick = e => { if (e.target.matches('.fdel')) e.target.closest('.fac').remove(); };
+    $('#facs').onclick = e => {
+      if (e.target.matches('.fdel')) e.target.closest('.fac').remove();
+      if (e.target.matches('.fhere')) {
+        const input = $('.fg', e.target.closest('.fac'));
+        guard(async () => {
+          const g = await Geo.get();
+          if (g.error) throw new Error(g.error);
+          input.value = `${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`;
+        }, 'Đang lấy vị trí...');
+      }
+    };
     $('#save').onclick = () => {
       const factories = $$('#facs .fac').map(r => ({
-        code: $('.fc', r).value.trim(), name: $('.fn', r).value.trim(), address: $('.fa', r).value.trim(), inputFile: $('.ff', r).value.trim()
+        code: $('.fc', r).value.trim(), name: $('.fn', r).value.trim(), address: $('.fa', r).value.trim(), inputFile: $('.ff', r).value.trim(),
+        ...parseLatLng($('.fg', r).value)
       })).filter(f => f.code && f.name);
       const committeeRoles = $('#roles').value.split('\n').map(l => l.split('|').map(x => x.trim())).filter(a => a[0] || a[1])
         .map(([role, title, name]) => ({ role: role || '', title: title || '', name: name || '' }));
@@ -706,8 +852,14 @@
     return `<div class="fac">
       <div class="row gap"><input class="fc" placeholder="Mã" value="${E(f.code)}" style="max-width:90px"><input class="fn" placeholder="Tên nhà máy" value="${E(f.name)}"></div>
       <div class="row gap"><input class="fa" placeholder="Địa chỉ (in trên biên bản)" value="${E(f.address || '')}"><input class="ff" placeholder="Tên file input, vd FDREPORT-333*.xlsx" value="${E(f.inputFile || '')}"></div>
+      <div class="row gap"><input class="fg" placeholder="Toạ độ nhà máy: vĩ độ, kinh độ (để đối chiếu ảnh)" value="${f.lat != null && f.lat !== '' ? E(f.lat + ', ' + f.lng) : ''}"><button class="btn small-btn fhere">Lấy vị trí hiện tại</button></div>
       <button class="btn small-btn fdel">Xóa nhà máy</button>
     </div>`;
+  }
+
+  function parseLatLng(v) {
+    const m = String(v || '').match(/(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)/);
+    return m ? { lat: Number(m[1]), lng: Number(m[2]) } : { lat: null, lng: null };
   }
 
   // ---------- điều hướng ----------

@@ -1,8 +1,9 @@
 // Lưu trữ offline bằng IndexedDB: dữ liệu tồn kho đã tải, phiên kiểm kê, file chờ đồng bộ.
 const DB = (function () {
   const NAME = 'kiem-kho';
-  const VERSION = 1;
-  const STORES = ['datasets', 'sessions', 'outbox'];
+  const VERSION = 2;
+  // files: PDF/Excel đã tạo sẵn cho từng phiên, để nút Xem / Tải về / Chia sẻ phản hồi ngay
+  const STORES = ['datasets', 'sessions', 'outbox', 'files'];
   let dbPromise;
 
   function open() {

@@ -145,7 +145,7 @@ const Reports = (function () {
       { text: 'BIÊN BẢN KIỂM KÊ HÀNG TỒN KHO', style: 'title' },
       { text: 'Kho : ' + storeTitle(s), alignment: 'center', italics: true, fontSize: 10, margin: [0, 0, 0, 8] },
       { text: `Ngày Kiểm Kho :            ${Util.vnDate(s.countDate)}`, fontSize: 8 },
-      { text: `Thời gian bắt đầu : ${hm(s.startedAt)}    Thời gian kết thúc : ${s.finishedAt ? hm(s.finishedAt) : '.......'}`, fontSize: 8, margin: [0, 0, 0, 3] },
+      { text: `Thời gian bắt đầu : ${hm(startTime(s))}    Thời gian kết thúc : ${endTime(s) ? hm(endTime(s)) : '.......'}`, fontSize: 8, margin: [0, 0, 0, 3] },
       {
         table: { headerRows: 3, widths: [16, 52, '*', 24, 58, 26, 40, 26, 40, 26, 38, 62], body },
         layout: { hLineWidth: () => 0.5, vLineWidth: () => 0.5, hLineColor: () => '#555', vLineColor: () => '#555', paddingLeft: () => 2, paddingRight: () => 2, paddingTop: () => 1, paddingBottom: () => 1 },
@@ -161,7 +161,7 @@ const Reports = (function () {
     ];
 
     if (withSignatures) {
-      const pics = photoAppendix(items);
+      const pics = [...presenceBlock(s), ...photoAppendix(items)];
       if (pics.length) content.push({ text: 'PHỤ LỤC: HÌNH ẢNH ĐÍNH KÈM', style: 'h2', pageBreak: 'before' }, ...pics);
     }
 
@@ -179,11 +179,39 @@ const Reports = (function () {
     };
   }
 
+  // Giờ bắt đầu / kết thúc lấy theo ảnh xác nhận có mặt
+  const startTime = s => (s.checkIn && s.checkIn.time) || s.startedAt;
+  const endTime = s => (s.checkOut && s.checkOut.time) || s.finishedAt;
+
+  // Ảnh bắt đầu / kết thúc kèm giờ và toạ độ
+  function presenceBlock(s) {
+    const cell = (label, p) => p ? {
+      width: '*', stack: [
+        { text: label, bold: true, fontSize: 9 },
+        { image: p.data, fit: [240, 240], margin: [0, 3, 0, 3] },
+        { text: `${Stamp.dt(new Date(p.time))} · ${Geo.fmt(p.geo)}`, fontSize: 8 },
+        distanceText(s, p) ? { text: distanceText(s, p), fontSize: 8, italics: true } : ''
+      ]
+    } : { width: '*', text: '' };
+    if (!s.checkIn && !s.checkOut) return [];
+    return [{ columns: [cell('Ảnh bắt đầu kiểm kê', s.checkIn), cell('Ảnh kết thúc kiểm kê', s.checkOut)], columnGap: 12, margin: [0, 4, 0, 8], unbreakable: true }];
+  }
+
+  function distanceText(s, p) {
+    const f = s.factory;
+    if (!p || !p.geo || p.geo.error || f.lat == null || f.lat === '' || f.lng == null) return '';
+    const d = Geo.distance(p.geo, { lat: Number(f.lat), lng: Number(f.lng) });
+    return `Cách toạ độ nhà máy ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'}`;
+  }
+
   function photoAppendix(items) {
     const out = [];
     items.filter(it => (it.photos || []).length).forEach(it => {
       out.push({ text: `${it.code} – ${it.name} – Lô ${it.lot} – ${it.warehouse}` + (it.var ? `  (chênh lệch SL ${signed(it.var.qty)}, KL ${signed(it.var.wgh)})` : '') + (it.note ? ` – ${it.note}` : ''), bold: true, fontSize: 8, margin: [0, 6, 0, 2] });
-      out.push({ columns: it.photos.map(p => ({ image: p, fit: [170, 130] })), columnGap: 6 });
+      // 2 ảnh mỗi hàng, đủ lớn để đọc được dòng ngày giờ / toạ độ in trên ảnh
+      for (let i = 0; i < it.photos.length; i += 2) {
+        out.push({ columns: it.photos.slice(i, i + 2).map(p => ({ image: p, fit: [250, 220] })), columnGap: 8, margin: [0, 0, 0, 6] });
+      }
     });
     return out;
   }
@@ -221,7 +249,10 @@ const Reports = (function () {
       { text: dateWords(s.countDate), alignment: 'center', italics: true, margin: [0, 0, 0, 10] },
       { text: 'I. THÔNG TIN CHUNG', style: 'h2' },
       p(`Nhà máy / địa điểm: ${s.factory.name}${s.factory.address ? ' – ' + s.factory.address : ''}`),
-      p(`Thời gian: bắt đầu ${Util.vnDateTime(s.startedAt)}${s.finishedAt ? ', kết thúc ' + Util.vnDateTime(s.finishedAt) : ''}`),
+      p(`Thời gian: bắt đầu ${Stamp.dt(new Date(startTime(s)))}${endTime(s) ? ', kết thúc ' + Stamp.dt(new Date(endTime(s))) : ''}`),
+      s.checkIn ? p(`Vị trí lúc bắt đầu: ${Geo.fmt(s.checkIn.geo)}${distanceText(s, s.checkIn) ? ' – ' + distanceText(s, s.checkIn) : ''}`) : '',
+      s.checkOut ? p(`Vị trí lúc kết thúc: ${Geo.fmt(s.checkOut.geo)}${distanceText(s, s.checkOut) ? ' – ' + distanceText(s, s.checkOut) : ''}`) : '',
+      ...presenceBlock(s),
       p(`Người lập báo cáo: ${user.name || ''} (${user.email || ''})`),
       p('Thành phần tham gia: ' + s.committee.filter(m => m.name).map(m => `${m.name} (${m.title || m.role})`).join('; ')),
       p('Mục đích: ' + (tr.purpose || 'Kiểm kê định kỳ, đối chiếu số lượng tồn kho thực tế với số liệu sổ sách, kiểm tra hạn sử dụng hàng tồn.')),
