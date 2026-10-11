@@ -1,9 +1,9 @@
 // Service worker: lưu toàn bộ app trên máy để chạy không cần mạng.
 // Có mạng thì lấy bản mới nhất từ máy chủ (để điện thoại không bị kẹt ở bản cũ), mất mạng thì dùng bản đã lưu.
-const CACHE = 'kiem-kho-v1.5.0';
+const CACHE = 'kiem-kho-v1.6.0';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'icons/icon-192.png', 'icons/icon-512.png',
+  'icons/icon-192.png', 'icons/icon-512.png', 'assets/factory-default.jpg', 'assets/logo.png',
   'vendor/xlsx.full.min.js', 'vendor/pdfmake.min.js', 'vendor/vfs_fonts.js', 'vendor/msal-browser.min.js',
   'vendor/pdf.min.js', 'vendor/pdf.worker.min.js', 'vendor/html5-qrcode.min.js',
   'js/config.js', 'js/tcvn3.js', 'js/util.js', 'js/db.js', 'js/importer.js', 'js/auth.js',

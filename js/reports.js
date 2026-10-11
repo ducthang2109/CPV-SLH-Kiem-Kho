@@ -223,185 +223,360 @@ const Reports = (function () {
     return out;
   }
 
-  // ---------- Báo cáo kiểm kê: trang bìa / nội dung / hình ảnh / Thank You ----------
+  // ---------- Báo cáo kiểm kê dạng slide (A4 ngang) ----------
+  // Bố cục theo cách trình bày báo cáo kiểm kê chuyên nghiệp: bìa → tóm tắt điều hành (KPI) → kết quả theo kho
+  // → chênh lệch & hạn dùng → biên bản đã ký → hình ảnh → vấn đề phát sinh → kế hoạch hành động → Thank You.
   // opts.minutesImages: ảnh các trang biên bản đã ký; opts.cover: ảnh bìa nhà máy
   function tripDoc(s, opts = {}) {
     const { items, sum } = summary(s);
     const tr = s.trip || {};
     const user = s.user || {};
-    const ACCENT = '#f39200';
-    const W = 595.28, Hh = 841.89, M = 36, CW = W - 2 * M;
+    const ACCENT = '#f39200', DARK = '#1d2433', MUTED = '#6b7280', LINE = '#dfe5ec';
+    const RED = '#c62828', ORANGE = '#e65100', BLUE = '#1565c0';
+    const W = 841.89, H = 595.28, M = 36, CW = W - 2 * M, TOP = 70;
     const logo = Branding.logo();
-    const p = (t, o = {}) => Object.assign({ text: t, margin: [0, 2, 0, 2] }, o);
     const cover = opts.cover || s.coverPhoto || (s.checkIn && s.checkIn.data) || null;
     const st = startTime(s), en = endTime(s);
+    const images = {};
+    if (logo) images.logo = logo;
+    const P = (t, o = {}) => Object.assign({ text: t, margin: [0, 2, 0, 2] }, o);
+    const pct = (a, b) => b ? Math.round(a / b * 1000) / 10 : 0;
+    const kg = n => F(Util.round(n, 2)) + ' kg';
 
-    // Header mỗi trang: logo bên trái, tên báo cáo bên phải, gạch xanh bên dưới (trừ trang Thank You)
-    const header = (pg, n) => pg === n ? null : {
-      margin: [M, 14, M, 0],
-      stack: [
-        {
-          columns: [
-            logo ? { width: 150, image: logo, fit: [150, 38] } : { width: '*', text: s.companyName, bold: true, color: GREEN, fontSize: 10 },
-            { width: '*', alignment: 'right', fontSize: 8, color: '#555', stack: [
-              { text: 'BÁO CÁO KIỂM KÊ', bold: true, color: GREEN, fontSize: 9 },
-              { text: `${s.factory.name} · ${Util.vnDate(s.countDate)}` }
-            ], margin: [0, 8, 0, 0] }
-          ]
-        },
-        { canvas: [{ type: 'line', x1: 0, y1: 4, x2: CW, y2: 4, lineWidth: 1.5, lineColor: GREEN }] }
-      ]
+    // ---- số liệu tổng hợp ----
+    const counted = items.filter(i => i.actualQty != null);
+    const isDiff = i => i.var && (i.var.qty !== 0 || Math.abs(i.var.wgh) > 0.0005);
+    const diff = counted.filter(isDiff).sort((a, b) => Math.abs(b.var.wgh) - Math.abs(a.var.wgh));
+    const matchLines = counted.length - diff.length;
+    const accuracy = pct(matchLines, counted.length);
+    const coverage = pct(counted.length, items.length);
+    const sysW = counted.reduce((a, i) => a + i.sysWgh, 0);
+    const varW = counted.reduce((a, i) => a + i.var.wgh, 0);
+    const varQ = counted.reduce((a, i) => a + i.var.qty, 0);
+    const expired = items.filter(i => i.exp.status === 'expired');
+    const near = items.filter(i => i.exp.status === 'near');
+    const uncounted = items.filter(i => i.actualQty == null);
+    const scans = Object.keys(s.scannedTags || {}).length;
+    const unknown = (s.unknownScans || []).length;
+
+    // ---- khung trang: header logo + footer ----
+    const header = (pg, n) => (pg === 1 || pg === n) ? null : {
+      margin: [M, 16, M, 0],
+      stack: [{
+        columns: [
+          logo ? { width: 160, image: 'logo', fit: [160, 34] } : { width: '*', text: s.companyName, bold: true, color: GREEN, fontSize: 10 },
+          { width: '*', alignment: 'right', fontSize: 8, color: MUTED, margin: [0, 6, 0, 0], stack: [
+            { text: 'BÁO CÁO KIỂM KÊ', bold: true, color: GREEN, fontSize: 9 },
+            { text: `${s.factory.name} · ${Util.vnDate(s.countDate)}` }
+          ] }
+        ]
+      }, { canvas: [{ type: 'line', x1: 0, y1: 5, x2: CW, y2: 5, lineWidth: 1.5, lineColor: GREEN }] }]
+    };
+    const footer = (pg, n) => (pg === 1 || pg === n) ? null : {
+      margin: [M, 8, M, 0], fontSize: 7, color: MUTED,
+      columns: [{ text: `${s.companyName} · ${docNo(s)}` }, { text: `${pg} / ${n}`, alignment: 'right' }]
     };
 
-    const section = (t, brk = true) => ({
-      table: { widths: ['*'], body: [[{ text: t, color: '#fff', bold: true, fontSize: 13, fillColor: GREEN, margin: [8, 4, 8, 4] }]] },
-      layout: 'noBorders', margin: [0, 0, 0, 8], pageBreak: brk ? 'before' : undefined
+    // Tiêu đề slide: số mục + tiêu đề + 1 câu kết luận (thông điệp chính của slide)
+    const slide = (no, title, lead, first) => ({
+      stack: [
+        { text: [{ text: no + '  ', color: ACCENT, bold: true }, { text: title, bold: true, color: DARK }], fontSize: 18 },
+        lead ? { text: lead, fontSize: 10.5, color: MUTED, margin: [0, 3, 0, 0] } : ''
+      ],
+      margin: [0, 0, 0, 12], pageBreak: first ? undefined : 'before'
     });
-    const photoGrid = (list, size = [250, 230]) => {
+    const card = (label, value, sub, color) => ({
+      table: { widths: ['*'], body: [[{
+        stack: [
+          { text: label, fontSize: 9, color: MUTED },
+          { text: value, fontSize: 24, bold: true, color: color || GREEN, margin: [0, 4, 0, 2] },
+          { text: sub || '', fontSize: 8.5, color: MUTED }
+        ], margin: [10, 8, 10, 8]
+      }]] },
+      layout: { hLineWidth: () => 0, vLineWidth: (i) => i === 0 ? 4 : 0, vLineColor: () => color || GREEN, fillColor: () => '#f7f9fb' }
+    });
+    const tableLayout = {
+      hLineWidth: (i, node) => (i === 0 || i === 1 || i === node.table.body.length) ? 1 : 0.5,
+      vLineWidth: () => 0, hLineColor: (i) => i <= 1 ? GREEN : LINE,
+      fillColor: (r) => r === 0 ? GREEN : (r % 2 === 0 ? '#f7faf8' : null),
+      paddingTop: () => 4, paddingBottom: () => 4, paddingLeft: () => 5, paddingRight: () => 5
+    };
+    const th = t => ({ text: t, bold: true, color: '#fff', fontSize: 8.5 });
+    const photoGrid = (list, cols = 3, h = 150) => {
       const out = [];
-      for (let i = 0; i < list.length; i += 2) {
-        out.push({
-          columns: list.slice(i, i + 2).map(x => ({ width: '*', stack: [{ image: x.data, fit: size }, { text: x.caption || '', fontSize: 8, color: '#444', margin: [0, 2, 0, 0] }] })).concat(list.length - i === 1 ? [{ width: '*', text: '' }] : []),
-          columnGap: 14, margin: [0, 0, 0, 10], unbreakable: true
-        });
+      const w = (CW - (cols - 1) * 12) / cols;
+      for (let i = 0; i < list.length; i += cols) {
+        const row = list.slice(i, i + cols).map(x => ({ width: w, stack: [
+          { image: x.data, fit: [w, h], alignment: 'center' },
+          { text: x.caption || '', fontSize: 7.5, color: MUTED, margin: [0, 3, 0, 0] }
+        ] }));
+        while (row.length < cols) row.push({ width: w, text: '' });
+        out.push({ columns: row, columnGap: 12, margin: [0, 0, 0, 10], unbreakable: true });
       }
       return out;
     };
 
-    // ===== Trang 1: bìa — ảnh nhà máy ở trên, tiêu đề, thông tin =====
-    const infoRow = (k, v) => [{ text: k, color: '#5f6b7a', fontSize: 10 }, { text: v || '', bold: true, fontSize: 11 }];
-    const content = [
-      cover
-        ? { image: cover, width: CW, height: 300, margin: [0, 6, 0, 0] }
-        : { canvas: [{ type: 'rect', x: 0, y: 0, w: CW, h: 300, color: GREEN_LIGHT }], margin: [0, 6, 0, 0] },
+    const content = [];
+
+    // ===== 1. Bìa: ảnh nhà máy nửa trái, thông tin nửa phải =====
+    const leftW = W * 0.52;
+    content.push(
+      cover ? { image: cover, width: leftW, height: H, absolutePosition: { x: 0, y: 0 } }
+        : { canvas: [{ type: 'rect', x: 0, y: 0, w: leftW, h: H, color: GREEN_LIGHT }], absolutePosition: { x: 0, y: 0 } },
+      { canvas: [{ type: 'rect', x: 0, y: 0, w: 6, h: H, color: ACCENT }], absolutePosition: { x: leftW, y: 0 } },
+      logo ? { image: 'logo', fit: [230, 60], absolutePosition: { x: leftW + 34, y: 40 } } : '',
+      { text: 'BÁO CÁO', fontSize: 16, bold: true, color: ACCENT, absolutePosition: { x: leftW + 34, y: 140 } },
+      { text: 'KIỂM KÊ', fontSize: 40, bold: true, color: GREEN, absolutePosition: { x: leftW + 32, y: 160 } },
+      { text: 'HÀNG TỒN KHO', fontSize: 16, bold: true, color: DARK, absolutePosition: { x: leftW + 34, y: 210 } },
+      { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 60, y2: 0, lineWidth: 3, lineColor: GREEN }], absolutePosition: { x: leftW + 34, y: 242 } },
       {
+        absolutePosition: { x: leftW + 34, y: 262 }, width: W - leftW - 70,
+        table: { widths: [86, '*'], body: [
+          ['Ngày kiểm kê', Util.vnDate(s.countDate)],
+          ['Nhà máy', s.factory.name],
+          ['Địa chỉ', s.factory.address || ''],
+          ['Kho kiểm', storeTitle(s)],
+          ['Thời gian', `${hm(st)}${en ? ' – ' + hm(en) : ''}`],
+          ['Số biên bản', docNo(s)]
+        ].map(([k, v]) => [{ text: k, fontSize: 9, color: MUTED }, { text: v, fontSize: 10, bold: true, color: DARK }]) },
+        layout: { hLineWidth: (i, node) => (i === 0 || i === node.table.body.length) ? 0 : 0.5, vLineWidth: () => 0, hLineColor: () => LINE, paddingTop: () => 4, paddingBottom: () => 4, paddingLeft: () => 0 }
+      },
+      {
+        absolutePosition: { x: leftW + 34, y: H - 92 }, width: W - leftW - 70,
         table: { widths: ['*'], body: [[{
-          stack: [
-            { text: 'BÁO CÁO KIỂM KÊ', fontSize: 30, bold: true, color: '#fff' },
-            { text: 'Hàng tồn kho · ' + storeTitle(s), fontSize: 12, color: '#d6f5e1', margin: [0, 2, 0, 0] }
-          ], fillColor: GREEN, margin: [16, 14, 16, 14]
+          stack: [{ text: 'NGƯỜI KIỂM TRA', fontSize: 8, color: '#fff', bold: true }, { text: `${user.name || ''}`, fontSize: 14, color: '#fff', bold: true }, { text: user.email || '', fontSize: 8.5, color: '#fff' }],
+          fillColor: ACCENT, margin: [12, 8, 12, 8]
         }]] },
         layout: 'noBorders'
-      },
-      { canvas: [{ type: 'rect', x: 0, y: 0, w: CW, h: 5, color: ACCENT }], margin: [0, 0, 0, 14] },
-      {
-        table: {
-          widths: [120, '*'],
-          body: [
-            infoRow('Ngày kiểm kê', dateWords(s.countDate).replace(/^ngày/, 'Ngày')),
-            infoRow('Nhà máy', s.factory.name),
-            infoRow('Địa chỉ', s.factory.address || ''),
-            infoRow('Kho kiểm kê', storeTitle(s)),
-            infoRow('Thời gian', `${hm(st)}${en ? ' – ' + hm(en) : ''}`),
-            infoRow('Số biên bản', docNo(s))
-          ]
-        },
-        layout: { hLineWidth: (i, node) => (i === 0 || i === node.table.body.length) ? 0 : 0.5, vLineWidth: () => 0, hLineColor: () => '#d5dce6', paddingTop: () => 5, paddingBottom: () => 5 }
-      },
-      {
-        table: { widths: ['*'], body: [[{
-          text: [{ text: 'Người kiểm tra:  ', color: '#fff' }, { text: `${user.name || ''}${user.email ? '  (' + user.email + ')' : ''}`, bold: true, color: '#fff' }],
-          fillColor: ACCENT, fontSize: 12, margin: [12, 8, 12, 8]
-        }]] },
-        layout: 'noBorders', margin: [0, 12, 0, 0]
       }
-    ];
+    );
 
-    // ===== 1. Biên bản có chữ ký =====
-    content.push(section('1. BIÊN BẢN KIỂM KÊ (CÓ CHỮ KÝ)'));
-    content.push(p(`Đã kiểm ${sum.counted}/${sum.lines} dòng hàng tại ${byWarehouse(items).size} kho. Trọng lượng sổ sách ${F(sum.sysWgh)} kg, thực tế ${F(sum.actWgh)} kg. ${sum.overLines} dòng thừa, ${sum.shortLines} dòng thiếu, ${sum.expired} dòng hết hạn, ${sum.near} dòng sắp hết hạn.`, { fontSize: 10 }));
-    if (opts.minutesImages && opts.minutesImages.length) {
-      opts.minutesImages.forEach((img, i) => content.push({ image: img, fit: [CW, Hh - 190], alignment: 'center', margin: [0, 4, 0, 0], pageBreak: i > 0 ? 'before' : undefined }));
-    } else {
-      content.push(p('Xem file biên bản kiểm kê đã ký kèm theo: ' + fileNames(s).signed, { italics: true }));
+    // ===== 2. Tóm tắt điều hành =====
+    const findings = [];
+    findings.push(`Đã kiểm ${counted.length}/${items.length} dòng hàng (${F(coverage)}%) tại ${byWarehouse(items).size} kho.`);
+    findings.push(diff.length ? `${diff.length} dòng chênh lệch: thừa/thiếu ${signed(Util.round(varQ))} ĐV, ${signed(Util.round(varW))} kg (${signed(pct(varW, sysW))}% trọng lượng sổ sách).` : 'Số lượng và trọng lượng thực tế khớp sổ sách.');
+    if (diff.length) findings.push(`Chênh lệch lớn nhất: ${diff[0].code} – ${diff[0].name}, lô ${diff[0].lot}: ${signed(diff[0].var.wgh)} kg.`);
+    if (expired.length || near.length) findings.push(`${expired.length} dòng đã hết hạn, ${near.length} dòng sắp hết hạn cần xử lý ưu tiên.`);
+    if (uncounted.length) findings.push(`${uncounted.length} dòng chưa kiểm được.`);
+    if (scans) findings.push(`Quét ${scans} tem${unknown ? `, trong đó ${unknown} tem không có trong tồn sổ sách` : ''}.`);
+    const actions = actionPlan();
+    content.push(slide('01', 'Tóm tắt kết quả kiểm kê', diff.length || expired.length ? 'Kho cơ bản khớp sổ sách, còn một số chênh lệch và hàng cận hạn cần xử lý.' : 'Tồn kho thực tế khớp sổ sách, không có hàng hết hạn.'));
+    content.push({
+      columns: [
+        card('Độ chính xác (dòng khớp)', F(accuracy) + '%', `${matchLines}/${counted.length} dòng khớp sổ sách`, accuracy >= 98 ? GREEN : accuracy >= 95 ? ORANGE : RED),
+        card('Tiến độ kiểm', F(coverage) + '%', `${counted.length}/${items.length} dòng đã kiểm`, coverage === 100 ? GREEN : ORANGE),
+        card('Chênh lệch trọng lượng', signed(Util.round(varW, 1)) + ' kg', `${signed(pct(varW, sysW))}% so với ${kg(sysW)} sổ sách`, Math.abs(varW) < 0.005 ? GREEN : RED),
+        card('Cảnh báo hạn dùng', String(expired.length + near.length), `${expired.length} hết hạn · ${near.length} sắp hết hạn`, expired.length ? RED : near.length ? ORANGE : GREEN)
+      ], columnGap: 12, margin: [0, 0, 0, 16]
+    });
+    content.push({
+      columns: [
+        { width: '*', stack: [
+          { text: 'PHÁT HIỆN CHÍNH', bold: true, color: GREEN, fontSize: 11, margin: [0, 0, 0, 6] },
+          { ul: findings, fontSize: 10, color: DARK, lineHeight: 1.25 }
+        ] },
+        { width: '*', stack: [
+          { text: 'HÀNH ĐỘNG ĐỀ XUẤT', bold: true, color: ACCENT, fontSize: 11, margin: [0, 0, 0, 6] },
+          { ol: actions.slice(0, 5).map(a => `${a.action} (${a.owner}, trước ${Util.vnDate(a.due)})`), fontSize: 10, color: DARK, lineHeight: 1.25 }
+        ] }
+      ], columnGap: 24
+    });
+
+    // ===== 3. Kết quả theo kho: bảng + biểu đồ chênh lệch =====
+    const whs = [...byWarehouse(items)].map(([wh, list]) => {
+      const c = list.filter(i => i.actualQty != null);
+      return {
+        wh, lines: list.length, counted: c.length,
+        sysQ: list.reduce((a, i) => a + i.sysQty, 0), actQ: c.reduce((a, i) => a + i.actualQty, 0),
+        sysW: list.reduce((a, i) => a + i.sysWgh, 0), actW: c.reduce((a, i) => a + i.aWgh, 0),
+        varW: c.reduce((a, i) => a + i.var.wgh, 0), diff: c.filter(isDiff).length
+      };
+    });
+    content.push(slide('02', 'Kết quả theo kho', `${whs.length} kho được kiểm. Biểu đồ bên phải cho thấy chênh lệch trọng lượng (kg) của từng kho so với sổ sách.`));
+    // Biểu đồ thanh: mỗi kho một hàng, thanh lệch trái (thiếu, đỏ) hoặc phải (thừa, xanh) quanh trục 0
+    const maxAbs = Math.max(0.01, ...whs.map(w => Math.abs(w.varW)));
+    const barW = 150, mid = barW / 2;
+    const chart = { width: 290, stack: [
+      { text: 'Chênh lệch trọng lượng theo kho (kg)', bold: true, fontSize: 9, color: DARK, margin: [0, 0, 0, 8] },
+      ...whs.map(w => {
+        const len = Math.max(1.5, Math.abs(w.varW) / maxAbs * (mid - 4));
+        const col = Math.abs(w.varW) < 0.005 ? '#b0bec5' : (w.varW > 0 ? BLUE : RED);
+        return { columns: [
+          { width: 100, text: w.wh.replace(/^(\S+)\s-\s/, '$1 '), fontSize: 7.5, color: DARK, margin: [0, 4, 0, 0] },
+          { width: barW, canvas: [
+            { type: 'rect', x: 0, y: 0, w: barW, h: 20, color: '#f3f6f4' },
+            { type: 'line', x1: mid, y1: -2, x2: mid, y2: 22, lineWidth: 1, lineColor: MUTED },
+            { type: 'rect', x: w.varW >= 0 ? mid : mid - len, y: 4, w: len, h: 12, color: col }
+          ] },
+          { width: '*', text: signed(Util.round(w.varW, 2)), fontSize: 8, bold: true, color: col, margin: [4, 4, 0, 0] }
+        ], columnGap: 4, margin: [0, 0, 0, 8] };
+      }),
+      { columns: [{ width: 100, text: '' }, { width: barW, columns: [{ text: '‹ thiếu', fontSize: 7, color: RED }, { text: 'thừa ›', fontSize: 7, color: BLUE, alignment: 'right' }] }], margin: [0, 2, 0, 0] }
+    ] };    content.push({
+      columns: [
+        { width: '*', table: { headerRows: 1, widths: ['*', 34, 52, 52, 56, 56, 52], body: [
+          ['Kho', 'Dòng', 'SL sổ sách', 'SL thực tế', 'KL sổ sách', 'KL thực tế', 'CL KL'].map(th),
+          ...whs.map(w => [
+            { text: w.wh, fontSize: 8.5 }, { text: `${w.counted}/${w.lines}`, alignment: 'right', fontSize: 8.5 },
+            { text: F(w.sysQ), alignment: 'right', fontSize: 8.5 }, { text: F(w.actQ), alignment: 'right', fontSize: 8.5 },
+            { text: F(Util.round(w.sysW, 2)), alignment: 'right', fontSize: 8.5 }, { text: F(Util.round(w.actW, 2)), alignment: 'right', fontSize: 8.5 },
+            { text: signed(Util.round(w.varW, 2)), alignment: 'right', fontSize: 8.5, bold: true, color: Math.abs(w.varW) < 0.005 ? DARK : (w.varW > 0 ? BLUE : RED) }
+          ]),
+          [{ text: 'Tổng cộng', bold: true, fontSize: 8.5 }, { text: `${counted.length}/${items.length}`, alignment: 'right', bold: true, fontSize: 8.5 },
+            { text: F(sum.sysQty), alignment: 'right', bold: true, fontSize: 8.5 }, { text: F(sum.actQty), alignment: 'right', bold: true, fontSize: 8.5 },
+            { text: F(Util.round(sum.sysWgh, 2)), alignment: 'right', bold: true, fontSize: 8.5 }, { text: F(Util.round(sum.actWgh, 2)), alignment: 'right', bold: true, fontSize: 8.5 },
+            { text: signed(Util.round(varW, 2)), alignment: 'right', bold: true, fontSize: 8.5 }]
+        ] }, layout: tableLayout },
+        chart
+      ], columnGap: 24
+    });
+
+    // ===== 4. Chênh lệch & hạn dùng =====
+    content.push(slide('03', 'Chênh lệch và hạn sử dụng', diff.length ? `Các dòng chênh lệch xếp theo mức chênh lệch trọng lượng lớn nhất.` : 'Không có dòng chênh lệch.'));
+    const topDiff = diff.slice(0, 10);
+    const expAll = expired.concat(near).slice(0, 10);
+    content.push({
+      columns: [
+        { width: '*', stack: [
+          { text: `HÀNG CHÊNH LỆCH (${diff.length})`, bold: true, color: GREEN, fontSize: 10, margin: [0, 0, 0, 6] },
+          topDiff.length ? { table: { headerRows: 1, widths: [44, '*', 66, 38, 50], body: [
+            ['Mã', 'Tên hàng', 'Lô', 'CL SL', 'CL KL'].map(th),
+            ...topDiff.map(i => [{ text: i.code, fontSize: 8 }, { text: i.name, fontSize: 8 }, { text: i.lot, fontSize: 7.5 },
+              { text: signed(i.var.qty), alignment: 'right', fontSize: 8, color: i.var.qty < 0 ? RED : BLUE, bold: true },
+              { text: signed(i.var.wgh), alignment: 'right', fontSize: 8, color: i.var.wgh < 0 ? RED : BLUE, bold: true }])
+          ] }, layout: tableLayout } : P('Không có chênh lệch.', { italics: true, color: MUTED }),
+          diff.length > topDiff.length ? P(`… và ${diff.length - topDiff.length} dòng khác (xem biên bản).`, { fontSize: 8, color: MUTED }) : ''
+        ] },
+        { width: '*', stack: [
+          { text: `HẠN SỬ DỤNG (${expired.length} hết hạn · ${near.length} sắp hết hạn)`, bold: true, color: ACCENT, fontSize: 10, margin: [0, 0, 0, 6] },
+          expAll.length ? { table: { headerRows: 1, widths: [44, '*', 52, 50, 70], body: [
+            ['Mã', 'Tên hàng', 'HSD', 'SL', 'Tình trạng'].map(th),
+            ...expAll.map(i => [{ text: i.code, fontSize: 8 }, { text: i.name, fontSize: 8 }, { text: Util.vnDate(i.exp.expDate), fontSize: 8 },
+              { text: F(i.actualQty != null ? i.actualQty : i.sysQty), alignment: 'right', fontSize: 8 },
+              { text: i.exp.label, fontSize: 7.5, bold: true, color: i.exp.status === 'expired' ? RED : ORANGE }])
+          ] }, layout: tableLayout } : P('Không có hàng hết hạn / sắp hết hạn.', { italics: true, color: MUTED })
+        ] }
+      ], columnGap: 20
+    });
+
+    // ===== 5. Biên bản kiểm kê có chữ ký: 2 trang biên bản trên một slide =====
+    const mins = opts.minutesImages || [];
+    for (let i = 0; i < Math.max(1, mins.length); i += 2) {
+      content.push(slide('04', 'Biên bản kiểm kê (có chữ ký)', i === 0 ? `Biên bản số ${docNo(s)}, ${mins.length} trang, ký xác nhận trên ứng dụng.` : '', false));
+      if (!mins.length) { content.push(P('Xem file biên bản kiểm kê đã ký kèm theo: ' + fileNames(s).signed, { italics: true })); break; }
+      content.push({
+        columns: mins.slice(i, i + 2).map(img => ({ width: '*', image: img, fit: [(CW - 16) / 2, H - TOP - 120], alignment: 'center' })),
+        columnGap: 16
+      });
     }
 
-    // ===== 2. Hình ảnh nội dung kiểm kê: có mặt, hiện trường =====
-    content.push(section('2. HÌNH ẢNH NỘI DUNG KIỂM KÊ'));
+    // ===== 6. Hình ảnh nội dung kiểm kê =====
     const scene = [];
-    if (s.checkIn) scene.push({ data: s.checkIn.data, caption: `Bắt đầu kiểm kê – ${Stamp.dt(new Date(s.checkIn.time))} – ${Geo.fmt(s.checkIn.geo)}` });
-    if (s.checkOut) scene.push({ data: s.checkOut.data, caption: `Kết thúc kiểm kê – ${Stamp.dt(new Date(s.checkOut.time))} – ${Geo.fmt(s.checkOut.geo)}` });
+    if (s.checkIn) scene.push({ data: s.checkIn.data, caption: `Bắt đầu – ${Stamp.dt(new Date(s.checkIn.time))} – ${Geo.fmt(s.checkIn.geo)}` });
+    if (s.checkOut) scene.push({ data: s.checkOut.data, caption: `Kết thúc – ${Stamp.dt(new Date(s.checkOut.time))} – ${Geo.fmt(s.checkOut.geo)}` });
     (s.generalPhotos || []).forEach(g => scene.push({ data: g.data, caption: g.caption || 'Hình ảnh hiện trường' }));
-    if (scene.length) content.push(...photoGrid(scene));
-    else content.push(p('Không có ảnh.', { italics: true }));
+    content.push(slide('05', 'Hình ảnh nội dung kiểm kê', 'Ảnh xác nhận có mặt và hiện trường, có in ngày giờ, nhà máy, địa chỉ và toạ độ GPS.'));
+    if (scene.length) content.push(...photoGrid(scene, 3, 175)); else content.push(P('Không có ảnh.', { italics: true, color: MUTED }));
 
-    // ===== 3. Hình ảnh một số sản phẩm kiểm kho =====
-    const issueOf = it => {
-      const v = it.var;
-      const tags = [];
-      if (it.actualQty == null) tags.push({ t: 'Chưa kiểm', c: '#757575' });
-      if (v && v.qty < 0) tags.push({ t: 'Thiếu', c: '#c62828' });
-      if (v && v.qty > 0) tags.push({ t: 'Thừa', c: '#1565c0' });
-      if (v && v.qty === 0 && Math.abs(v.wgh) > 0.0005) tags.push({ t: 'Lệch trọng lượng', c: '#c62828' });
-      if (it.exp.status === 'expired') tags.push({ t: 'Hết hạn', c: '#c62828' });
-      if (it.exp.status === 'near') tags.push({ t: 'Sắp hết hạn', c: '#e65100' });
-      if (it.isExtra) tags.push({ t: 'Ngoài sổ sách', c: '#6a1b9a' });
+    // ===== 7. Hình ảnh sản phẩm kiểm kho =====
+    const issueTags = it => {
+      const v = it.var, tags = [];
+      if (v && v.qty < 0) tags.push(['Thiếu', RED]);
+      if (v && v.qty > 0) tags.push(['Thừa', BLUE]);
+      if (v && v.qty === 0 && Math.abs(v.wgh) > 0.0005) tags.push(['Lệch trọng lượng', RED]);
+      if (it.exp.status === 'expired') tags.push(['Hết hạn', RED]);
+      if (it.exp.status === 'near') tags.push(['Sắp hết hạn', ORANGE]);
+      if (it.isExtra) tags.push(['Ngoài sổ sách', '#6a1b9a']);
       return tags;
     };
-    const issues = items.filter(it => issueOf(it).some(t => t.t !== 'Chưa kiểm'));
+    const issues = items.filter(it => issueTags(it).length);
     const issueIds = new Set(issues.map(i => i.id));
     const productPhotos = [];
     items.filter(it => !issueIds.has(it.id) && (it.photos || []).length).forEach(it =>
       it.photos.forEach(ph => productPhotos.push({ data: ph, caption: `${it.code} – ${it.name} – Lô ${it.lot}` })));
-    content.push(section('3. HÌNH ẢNH SẢN PHẨM KIỂM KHO'));
-    if (productPhotos.length) content.push(...photoGrid(productPhotos));
-    else content.push(p('Không có ảnh sản phẩm (ngoài các ảnh ở phần Vấn đề phát sinh).', { italics: true }));
+    content.push(slide('06', 'Hình ảnh sản phẩm kiểm kho', 'Một số sản phẩm được chụp trong quá trình kiểm đếm.'));
+    if (productPhotos.length) content.push(...photoGrid(productPhotos, 3, 175));
+    else content.push(P('Không có ảnh sản phẩm (ảnh hàng có vấn đề nằm ở mục tiếp theo).', { italics: true, color: MUTED }));
 
-    // ===== 4. Vấn đề phát sinh =====
-    const uncounted = items.filter(i => i.actualQty == null);
-    content.push(section('4. VẤN ĐỀ PHÁT SINH'));
-    if (!issues.length && !uncounted.length) content.push(p('Không có vấn đề phát sinh: số lượng khớp sổ sách, không có hàng hết hạn.'));
-    issues.forEach((it, n) => {
+    // ===== 8. Vấn đề phát sinh =====
+    content.push(slide('07', 'Vấn đề phát sinh', issues.length ? `${issues.length} dòng hàng cần lưu ý, kèm ghi chú và hình ảnh.` : 'Không có vấn đề phát sinh.'));
+    const issueCard = it => {
       const v = it.var;
-      const block = [
-        { text: [{ text: `${n + 1}. ${it.code} – ${it.name}  `, bold: true }, ...issueOf(it).flatMap(t => [{ text: ` ${t.t} `, color: '#fff', background: t.c, bold: true, fontSize: 8 }, ' '])], fontSize: 10 },
-        { text: `Lô ${it.lot} · ${it.warehouse} · NSX ${Util.vnDate(it.prodDate)} · HSD ${Util.vnDate(it.exp.expDate)} (${it.exp.label})`, fontSize: 8, color: '#555', margin: [0, 1, 0, 2] },
-        v ? { text: `Sổ sách ${F(it.sysQty)} / ${F(it.sysWgh)} kg   |   Thực tế ${F(it.actualQty)} / ${F(it.aWgh)} kg   |   Chênh lệch ${signed(v.qty)} / ${signed(v.wgh)} kg`, fontSize: 9 } : '',
-        it.note ? { text: [{ text: 'Ghi chú: ', bold: true }, it.note], fontSize: 9, margin: [0, 2, 0, 0] } : ''
-      ];
-      content.push({ stack: block, margin: [0, 6, 0, 4], unbreakable: true });
-      if ((it.photos || []).length) content.push(...photoGrid(it.photos.map(ph => ({ data: ph, caption: `${it.code} – Lô ${it.lot}` }))));
-      content.push({ canvas: [{ type: 'line', x1: 0, y1: 0, x2: CW, y2: 0, lineWidth: 0.5, lineColor: '#d5dce6' }], margin: [0, 2, 0, 2] });
-    });
-    if (uncounted.length) content.push(p(`Chưa kiểm ${uncounted.length} dòng: ` + uncounted.map(i => `${i.code}/${i.lot}`).join(', '), { fontSize: 9, color: '#555' }));
+      return { stack: [
+        { text: [{ text: `${it.code} – ${it.name}  `, bold: true, fontSize: 10, color: DARK },
+          ...issueTags(it).flatMap(([t, c]) => [{ text: ` ${t} `, color: '#fff', background: c, bold: true, fontSize: 7.5 }, ' '])] },
+        { text: `Lô ${it.lot} · ${it.warehouse} · HSD ${Util.vnDate(it.exp.expDate)} (${it.exp.label})`, fontSize: 7.5, color: MUTED, margin: [0, 2, 0, 2] },
+        v ? { text: `Sổ sách ${F(it.sysQty)} / ${F(it.sysWgh)} kg   |   Thực tế ${F(it.actualQty)} / ${F(it.aWgh)} kg   |   CL ${signed(v.qty)} / ${signed(v.wgh)} kg`, fontSize: 8.5 } : { text: 'Chưa kiểm', fontSize: 8.5, color: MUTED },
+        it.note ? { text: [{ text: 'Ghi chú: ', bold: true }, it.note], fontSize: 8.5, margin: [0, 2, 0, 0] } : '',
+        (it.photos || []).length ? { columns: it.photos.slice(0, 3).map(ph => ({ image: ph, fit: [110, 85] })), columnGap: 6, margin: [0, 4, 0, 0] } : ''
+      ], margin: [0, 0, 0, 10], unbreakable: true };
+    };
+    if (issues.length) {
+      for (let i = 0; i < issues.length; i += 2) {
+        content.push({ columns: [issueCard(issues[i]), issues[i + 1] ? issueCard(issues[i + 1]) : { text: '' }], columnGap: 20 });
+      }
+    }
+    if (unknown) content.push(P(`Tem không có trong tồn sổ sách (${unknown}): ` + s.unknownScans.map(u => u.text).join(' · '), { fontSize: 8, color: RED }));
+    if (uncounted.length) content.push(P(`Chưa kiểm (${uncounted.length}): ` + uncounted.map(i => `${i.code}/${i.lot}`).join(', '), { fontSize: 8, color: MUTED }));
 
+    // ===== 9. Kế hoạch hành động & kết luận =====
+    content.push(slide('08', 'Kết luận và kế hoạch hành động', 'Các việc cần làm sau kiểm kê, người phụ trách và thời hạn đề xuất.'));
+    content.push({ table: { headerRows: 1, widths: [20, '*', '*', 110, 70], body: [
+      ['#', 'Vấn đề', 'Hành động', 'Phụ trách', 'Thời hạn'].map(th),
+      ...actions.map((a, i) => [{ text: i + 1, fontSize: 9 }, { text: a.issue, fontSize: 9 }, { text: a.action, fontSize: 9 }, { text: a.owner, fontSize: 9 }, { text: Util.vnDate(a.due), fontSize: 9, bold: true }])
+    ] }, layout: tableLayout, margin: [0, 0, 0, 12] });
     content.push({
-      unbreakable: true, stack: [
-        { text: 'Kết luận', bold: true, fontSize: 11, color: GREEN, margin: [0, 10, 0, 2] },
-        p(tr.conclusion || '........................................................................................................'),
-        { text: 'Kiến nghị', bold: true, fontSize: 11, color: GREEN, margin: [0, 8, 0, 2] },
-        p(tr.recommendation || '........................................................................................................'),
-        {
-          columns: [{ width: '*', text: '' }, { width: 200, alignment: 'center', stack: [
-            { text: dateWords(s.countDate), italics: true, fontSize: 9 },
-            { text: 'NGƯỜI KIỂM TRA', bold: true },
-            s.reporterSignature ? { image: s.reporterSignature, fit: [120, 50], margin: [0, 4, 0, 2] } : { text: ' ', margin: [0, 25, 0, 25] },
-            { text: user.name || '', bold: true }
-          ] }], margin: [0, 10, 0, 0]
-        }
-      ]
+      columns: [
+        { width: '*', stack: [
+          { text: 'KẾT LUẬN', bold: true, color: GREEN, fontSize: 10, margin: [0, 0, 0, 3] },
+          P(tr.conclusion || findings.join(' '), { fontSize: 9.5 }),
+          tr.recommendation ? { text: 'KIẾN NGHỊ', bold: true, color: GREEN, fontSize: 10, margin: [0, 6, 0, 3] } : '',
+          tr.recommendation ? P(tr.recommendation, { fontSize: 9.5 }) : ''
+        ] },
+        { width: 200, alignment: 'center', stack: [
+          { text: dateWords(s.countDate), italics: true, fontSize: 9 },
+          { text: 'NGƯỜI KIỂM TRA', bold: true, fontSize: 10 },
+          s.reporterSignature ? { image: s.reporterSignature, fit: [130, 55], margin: [0, 4, 0, 2] } : { text: ' ', margin: [0, 25, 0, 25] },
+          { text: user.name || '', bold: true }
+        ] }
+      ], columnGap: 24, unbreakable: true
     });
 
-    // ===== Trang cuối: Thank You =====
+    // ===== 10. Thank You =====
     content.push(
       { text: '', pageBreak: 'before' },
-      { canvas: [{ type: 'rect', x: 0, y: 0, w: W, h: Hh, color: GREEN }, { type: 'rect', x: 0, y: Hh / 2 + 70, w: W, h: 6, color: ACCENT }], absolutePosition: { x: 0, y: 0 } },
-      logo ? { canvas: [{ type: 'rect', x: 0, y: 0, w: 300, h: 100, r: 10, color: '#ffffff' }], absolutePosition: { x: (W - 300) / 2, y: 150 } } : '',
-      logo ? { image: logo, fit: [270, 80], absolutePosition: { x: (W - 270) / 2, y: 160 } } : '',
-      { text: 'THANK YOU', color: '#ffffff', fontSize: 54, bold: true, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 - 70 } },
-      { text: 'Xin cảm ơn!', color: '#ffe0a8', fontSize: 18, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 5 } },
-      { text: s.companyName, color: '#ffffff', fontSize: 11, bold: true, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 100 } },
-      { text: `${s.factory.name} · ${Util.vnDate(s.countDate)}`, color: '#d6f5e1', fontSize: 10, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 118 } }
+      { canvas: [{ type: 'rect', x: 0, y: 0, w: W, h: H, color: GREEN }, { type: 'rect', x: 0, y: H - 70, w: W, h: 6, color: ACCENT }], absolutePosition: { x: 0, y: 0 } },
+      logo ? { canvas: [{ type: 'rect', x: 0, y: 0, w: 280, h: 86, r: 10, color: '#ffffff' }], absolutePosition: { x: 60, y: 70 } } : '',
+      logo ? { image: 'logo', fit: [250, 66], absolutePosition: { x: 75, y: 80 } } : '',
+      { text: 'THANK YOU', color: '#ffffff', fontSize: 60, bold: true, absolutePosition: { x: 60, y: 220 } },
+      { text: 'Xin cảm ơn!', color: '#ffe0a8', fontSize: 20, absolutePosition: { x: 64, y: 300 } },
+      { text: s.companyName, color: '#ffffff', fontSize: 11, bold: true, absolutePosition: { x: 64, y: 360 } },
+      { text: `${s.factory.name} · ${Util.vnDate(s.countDate)} · ${docNo(s)}`, color: '#d6f5e1', fontSize: 10, absolutePosition: { x: 64, y: 378 } }
     );
 
     return {
-      pageSize: 'A4', pageMargins: [M, 72, M, 36],
-      defaultStyle: { font: 'Roboto', fontSize: 10 },
-      header,
-      footer: (pg, n) => (pg === n) ? null : ({ text: `Báo cáo kiểm kê ${docNo(s)}   ·   ${pg}/${n}`, alignment: 'right', fontSize: 7, color: '#777', margin: [0, 10, M, 0] }),
+      pageSize: 'A4', pageOrientation: 'landscape', pageMargins: [M, TOP, M, 34],
+      defaultStyle: { font: 'Roboto', fontSize: 10, color: DARK },
+      images, header, footer,
       info: { title: 'Báo cáo kiểm kê ' + docNo(s) },
       content
     };
+
+    // Kế hoạch hành động tự đề xuất từ kết quả (có thể sửa bằng phần Kiến nghị)
+    function actionPlan() {
+      const d = n => Util.addDays(s.countDate, n);
+      const list = [];
+      const short = diff.filter(i => i.var.qty < 0 || (i.var.qty === 0 && i.var.wgh < 0));
+      const over = diff.filter(i => i.var.qty > 0 || (i.var.qty === 0 && i.var.wgh > 0));
+      if (short.length) list.push({ issue: `${short.length} dòng thiếu (${signed(Util.round(short.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Đối chiếu phiếu xuất/nhập, giải trình nguyên nhân, điều chỉnh sổ sau khi được duyệt', owner: 'Thủ kho + Kế toán', due: d(2) });
+      if (over.length) list.push({ issue: `${over.length} dòng thừa (${signed(Util.round(over.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Kiểm tra chứng từ nhập chưa ghi sổ, nhập bổ sung vào hệ thống', owner: 'Thủ kho + Kế toán', due: d(2) });
+      if (expired.length) list.push({ issue: `${expired.length} dòng đã hết hạn`, action: 'Cách ly hàng, lập biên bản xử lý / hủy', owner: 'QA + Quản lý kho', due: d(1) });
+      if (near.length) list.push({ issue: `${near.length} dòng sắp hết hạn`, action: 'Ưu tiên xuất trước (FEFO), báo bộ phận bán hàng', owner: 'Quản lý kho', due: d(1) });
+      if (uncounted.length) list.push({ issue: `${uncounted.length} dòng chưa kiểm`, action: 'Kiểm bổ sung và cập nhật biên bản', owner: 'Kế toán', due: d(1) });
+      if (unknown) list.push({ issue: `${unknown} tem không có trong tồn`, action: 'Xác minh tem, kiểm tra hàng chưa nhập hệ thống', owner: 'Thủ kho', due: d(2) });
+      if (!list.length) list.push({ issue: 'Không có chênh lệch', action: 'Duy trì quy trình quản lý kho hiện tại, kiểm kê định kỳ', owner: 'Quản lý kho', due: d(30) });
+      return list;
+    }
   }
 
   function toBlob(doc) {
@@ -422,6 +597,25 @@ const Reports = (function () {
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'KetQuaKiemKe');
+    // Tổng theo mã hàng (cộng các lô / các lần cân)
+    const byCode = new Map();
+    items.forEach(it => {
+      const r = byCode.get(it.code) || { 'Mã hàng': it.code, 'Tên hàng': it.name, 'Số dòng': 0, 'SL sổ sách': 0, 'KL sổ sách': 0, 'SL thực tế': 0, 'KL thực tế': 0, 'Số lần cân/quét': 0 };
+      r['Số dòng']++; r['SL sổ sách'] += it.sysQty; r['KL sổ sách'] = Util.round(r['KL sổ sách'] + it.sysWgh);
+      if (it.actualQty != null) { r['SL thực tế'] += it.actualQty; r['KL thực tế'] = Util.round(r['KL thực tế'] + it.aWgh); }
+      r['Số lần cân/quét'] += (it.weighs || []).length;
+      byCode.set(it.code, r);
+    });
+    const codeRows = [...byCode.values()].map(r => Object.assign(r, { 'CL SL': Util.round(r['SL thực tế'] - r['SL sổ sách']), 'CL KL': Util.round(r['KL thực tế'] - r['KL sổ sách']) }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(codeRows), 'TheoMaHang');
+    // Nhật ký từng lần cân / quét tem
+    const log = [];
+    items.forEach(it => (it.weighs || []).forEach((w, i) => log.push({
+      'Mã hàng': it.code, 'Tên hàng': it.name, 'Số lô': it.lot, 'Lần': i + 1, 'SL': w.qty, 'KL (kg)': w.wgh,
+      'Nguồn': w.src === 'scan' ? 'Quét tem' : 'Cân tay', 'KL ước tính': w.estimated ? 'x' : '', 'Thời gian': Util.vnDateTime(w.time), 'Nội dung tem': w.tag || ''
+    })));
+    (s.unknownScans || []).forEach(u => log.push({ 'Mã hàng': '?', 'Tên hàng': 'Tem không có trong tồn', 'Thời gian': Util.vnDateTime(u.time), 'Nội dung tem': u.text }));
+    if (log.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(log), 'CacLanCanQuet');
     const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }

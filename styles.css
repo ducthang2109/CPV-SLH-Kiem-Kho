@@ -86,6 +86,17 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 4px 0; }
 .check input { width: 20px; height: 20px; flex: 0 0 auto !important; margin: 0; }
 .updbar { position: fixed; left: 8px; right: 8px; bottom: 80px; z-index: 70; background: #263238; color: #fff; padding: 10px 12px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
 .updbar .btn { margin: 0; }
+.weighs { border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; font-size: 13px; overflow: hidden; }
+.wrow { display: grid; grid-template-columns: 34px 1fr 1.2fr 1.4fr 28px; gap: 4px; align-items: center; padding: 4px 8px; border-top: 1px solid var(--line); }
+.wrow:first-child { border-top: 0; }
+.wrow.total { background: #e6f4ea; font-weight: 700; }
+.wrow button { border: 0; background: none; color: var(--bad); font-size: 16px; cursor: pointer; }
+.addw { background: #f6faf7; border: 1px dashed #9ccfb0; border-radius: 8px; padding: 6px 8px; margin: 6px 0; }
+.addw label { margin: 0; }
+.addw .row { align-items: flex-end; }
+.scan-card { max-width: 480px; }
+.scan-result { min-height: 64px; padding: 8px; margin: 8px 0; border-radius: 8px; background: #f3f6f4; line-height: 1.5; }
+.scan-result code { word-break: break-all; font-size: 12px; }
 .search-row { flex-wrap: nowrap !important; }
 .search-row #q { flex: 1; }
 #reader { width: 100%; min-height: 220px; background: #000; border-radius: 8px; overflow: hidden; }

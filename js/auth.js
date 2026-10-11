@@ -12,6 +12,11 @@ const Config = (function () {
       oneDrive: Object.assign({}, d.oneDrive, saved.oneDrive)
     });
     cache.localUsers = cache.localUsers || [];
+    // Máy đã lưu danh sách nhà máy cũ: bổ sung các nhà máy mặc định mới (không ghi đè nhà máy đã sửa)
+    if (saved.factories && (saved.factoriesVersion || 1) < (d.factoriesVersion || 1)) {
+      const have = new Set(saved.factories.map(f => f.code));
+      cache.factories = saved.factories.concat(d.factories.filter(f => !have.has(f.code)));
+    }
     return cache;
   }
   function save(patch) {
@@ -25,9 +30,22 @@ const Config = (function () {
   return { get, save };
 })();
 
-// Ảnh bìa mặc định của từng nhà máy (lưu riêng trên máy vì ảnh lớn)
+// Ảnh/logo mặc định đi kèm app (assets/), nạp sẵn thành dataURL lúc mở app để dùng cả khi offline
+const Defaults = { cover: null, logo: null };
+async function loadDefaultAssets() {
+  const toData = async url => {
+    try {
+      const b = await (await fetch(url)).blob();
+      return await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(null); fr.readAsDataURL(b); });
+    } catch (e) { return null; }
+  };
+  [Defaults.cover, Defaults.logo] = await Promise.all([toData('assets/factory-default.jpg'), toData('assets/logo.png')]);
+}
+
+// Ảnh bìa của từng nhà máy (lưu riêng trên máy vì ảnh lớn). Chưa chọn thì dùng ảnh nhà máy mặc định.
 const Covers = {
-  get: code => { try { return localStorage.getItem('kk_cover_' + code); } catch (e) { return null; } },
+  get: code => { try { return localStorage.getItem('kk_cover_' + code) || Defaults.cover; } catch (e) { return Defaults.cover; } },
+  custom: code => { try { return !!localStorage.getItem('kk_cover_' + code); } catch (e) { return false; } },
   set: (code, data) => {
     try {
       if (data) localStorage.setItem('kk_cover_' + code, data); else localStorage.removeItem('kk_cover_' + code);
@@ -37,7 +55,10 @@ const Covers = {
 
 // Logo đầu trang báo cáo (lưu trên máy, chọn trong Cài đặt)
 const Branding = {
-  logo: () => { try { return localStorage.getItem('kk_logo'); } catch (e) { return null; } },
+  // 'none' = người dùng chủ động bỏ logo
+  logo: () => { try { const v = localStorage.getItem('kk_logo'); return v === 'none' ? null : (v || Defaults.logo); } catch (e) { return Defaults.logo; } },
+  custom: () => { try { return !!localStorage.getItem('kk_logo'); } catch (e) { return false; } },
+  reset: () => { try { localStorage.removeItem('kk_logo'); } catch (e) { /* bỏ qua */ } },
   setLogo: data => {
     try {
       if (data) localStorage.setItem('kk_logo', data); else localStorage.removeItem('kk_logo');

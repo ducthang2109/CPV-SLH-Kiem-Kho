@@ -286,7 +286,7 @@
         <button class="btn primary" id="review">Xem lại & ký ›</button>
       </div>`;
     $('#q').oninput = e => { filters.q = e.target.value; filters.limit = 80; drawList(); };
-    $('#scan').onclick = () => scanCode(s, text => { $('#q').value = text; filters.q = text; filters.limit = 80; drawList(); });
+    $('#scan').onclick = () => scanCode(s, () => drawList());
     $('#wh').onchange = e => { filters.wh = e.target.value; filters.limit = 80; drawList(); };
     $('#st').onchange = e => { filters.st = e.target.value; filters.limit = 80; drawList(); };
     $('#add').onclick = () => addExtra(s);
@@ -346,26 +346,76 @@
     };
   }
 
-  // Quét mã vạch / QR trên nhãn thùng để tìm nhanh dòng hàng (thư viện html5-qrcode, chạy offline)
-  function scanCode(s, onFound) {
+  // Quét tem QR / mã vạch liên tục: mỗi tem quét = 1 đơn vị đã đếm, cộng khối lượng in trên tem,
+  // so với tồn sổ sách và báo còn lại bao nhiêu. Tem đã quét rồi sẽ bị chặn để không đếm trùng.
+  function scanCode(s, onDone) {
     if (typeof Html5Qrcode === 'undefined') return toast('Không tải được bộ quét mã', 'err');
+    s.scannedTags = s.scannedTags || {};
+    s.unknownScans = s.unknownScans || [];
     const d = document.createElement('div');
     d.className = 'modal';
-    d.innerHTML = `<div class="card"><h3>Quét mã trên nhãn</h3><div id="reader"></div>
-      <p class="muted small">Đưa mã vạch hoặc QR (mã hàng / số lô) vào khung.</p>
-      <button class="btn block" id="scanClose">Đóng</button></div>`;
+    d.innerHTML = `<div class="card scan-card">
+      <div class="row between"><h3>Quét tem kiểm đếm</h3><span class="tag" id="scanCount">0 tem</span></div>
+      <div id="reader"></div>
+      <div id="scanResult" class="scan-result muted small">Đưa mã QR / mã vạch trên tem vào khung. Mỗi tem quét được tính 1 đơn vị và cộng khối lượng trên tem.</div>
+      <div class="row gap"><button class="btn" id="scanUndo" disabled>↶ Hủy tem vừa quét</button><button class="btn primary" id="scanClose">Xong</button></div>
+    </div>`;
     document.body.appendChild(d);
     const q = new Html5Qrcode('reader');
-    const close = () => { q.isScanning ? q.stop().catch(() => {}).finally(() => d.remove()) : d.remove(); };
+    let count = 0, lastText = '', lastAt = 0, lastAdded = null;
+    const show = (html, cls) => { const r = $('#scanResult', d); r.className = 'scan-result small ' + (cls || ''); r.innerHTML = html; };
+    const close = () => {
+      const done = () => { d.remove(); scheduleSave(); onDone && onDone(); };
+      q.isScanning ? q.stop().catch(() => {}).finally(done) : done();
+    };
     $('#scanClose', d).onclick = close;
-    q.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 160 } }, text => {
-      text = String(text).trim();
-      // Nhãn có thể chứa cả chuỗi dài: tìm số lô hoặc mã hàng nằm trong đó
-      const hit = s.items.find(i => i.lot && text.includes(i.lot)) || s.items.find(i => i.code && text.toUpperCase().includes(i.code.toUpperCase()));
+    $('#scanUndo', d).onclick = () => {
+      if (!lastAdded) return;
+      const { item, entry } = lastAdded;
+      item.weighs = item.weighs.filter(x => x !== entry);
+      delete s.scannedTags[entry.tag];
+      if (item.weighs.length) Util.applyWeighs(item); else { item.actualQty = null; item.actualWgh = null; }
+      count--; $('#scanCount', d).textContent = count + ' tem';
+      show(`Đã hủy tem vừa quét của <b>${E(item.code)}</b>.`, '');
+      lastAdded = null; $('#scanUndo', d).disabled = true; scheduleSave();
+    };
+
+    q.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 240, height: 240 } }, raw => {
+      const text = String(raw).trim();
+      const now = Date.now();
+      if (text === lastText && now - lastAt < 2500) return; // camera đọc lại cùng một tem
+      lastText = text; lastAt = now;
+      if (s.scannedTags[text]) {
+        if (navigator.vibrate) navigator.vibrate([60, 60, 60]);
+        const it = s.items.find(i => i.id === s.scannedTags[text]);
+        return show(`⚠ Tem này <b>đã quét rồi</b>${it ? ` (${E(it.code)} – lô ${E(it.lot)})` : ''}, không cộng thêm.`, 'warnc-text');
+      }
+      const p = Util.parseLabel(text, s.items);
+      if (!p.item) {
+        if (navigator.vibrate) navigator.vibrate([200]);
+        s.unknownScans.push({ text, time: new Date().toISOString() });
+        s.scannedTags[text] = '?';
+        return show(p.candidates.length > 1
+          ? `Tem khớp ${p.candidates.length} dòng (${p.candidates.map(i => E(i.code)).join(', ')}), chưa xác định được. Nội dung: <code>${E(text)}</code>`
+          : `❌ Không có trong tồn sổ sách. Đã ghi lại để báo cáo. Nội dung tem: <code>${E(text)}</code>`, 'short');
+      }
+      const it = p.item;
+      it.weighs = it.weighs || [];
+      // Tem không in khối lượng: dùng khối lượng bình quân/đơn vị theo sổ sách
+      const wgh = p.wgh != null ? p.wgh : (it.sysQty ? Util.round(it.sysWgh / it.sysQty) : 0);
+      const entry = { qty: 1, wgh, time: new Date().toISOString(), src: 'scan', tag: text, estimated: p.wgh == null };
+      it.weighs.push(entry);
+      Util.applyWeighs(it);
+      s.scannedTags[text] = it.id;
+      lastAdded = { item: it, entry }; $('#scanUndo', d).disabled = false;
+      count++; $('#scanCount', d).textContent = count + ' tem';
       if (navigator.vibrate) navigator.vibrate(80);
-      close();
-      onFound(hit ? (text.includes(hit.lot) ? hit.lot : hit.code) : text);
-      toast(hit ? `Tìm thấy ${hit.code} – lô ${hit.lot}` : 'Không thấy mã này trong danh sách, đã điền vào ô tìm kiếm');
+      clearSignatures(s);
+      const left = Util.round(it.sysQty - it.actualQty);
+      show(`✅ <b>${E(it.code)}</b> – ${E(it.name)} · lô ${E(it.lot)}<br>
+        +1 · ${F(wgh)} kg${entry.estimated ? ' (ước tính, tem không có KL)' : ''}<br>
+        Đã quét <b>${F(it.actualQty)}</b>/${F(it.sysQty)} · ${F(it.actualWgh)} kg · ${left > 0 ? `còn lại <b>${F(left)}</b>` : left === 0 ? '<b class="okc">đủ theo sổ</b>' : `<b class="over">thừa ${F(-left)}</b>`}`, '');
+      scheduleSave();
     }, () => {}).catch(e => { toast('Không mở được camera: ' + (e.message || e), 'err'); d.remove(); });
   }
 
@@ -433,21 +483,39 @@
     return `<span class="${v.qty > 0 || (v.qty === 0 && v.wgh > 0) ? 'over' : 'short'}">Chênh lệch: SL ${sg(v.qty)} · KL ${sg(v.wgh)} kg</span>`;
   }
 
+  function weighList(it) {
+    const w = it.weighs || [];
+    if (!w.length) return '';
+    return `<div class="weighs">${w.map((x, i) => `<div class="wrow"><span>#${i + 1}</span><span>${F(x.qty)} ĐV</span><span>${F(x.wgh)} kg${x.estimated ? '*' : ''}</span><span class="muted">${x.src === 'scan' ? 'quét tem' : 'cân'} ${new Date(x.time).toTimeString().slice(0, 5)}</span><button data-wrm="${i}" title="Xóa lần cân">✕</button></div>`).join('')}
+      <div class="wrow total"><span>Tổng</span><span>${F(it.actualQty)} ĐV</span><span>${F(it.actualWgh)} kg</span><span>${w.length} lần</span><span></span></div></div>`;
+  }
+
   function itemCard(it, s) {
     const e = Util.expiry(it, s.countDate, Config.get());
+    const multi = (it.weighs || []).length > 0;
+    const left = it.actualQty != null ? Util.round(it.sysQty - it.actualQty) : null;
     return `<div class="card item ${it.actualQty != null ? 'counted' : ''}" data-id="${it.id}">
       <div class="row between"><b>${E(it.code)}</b>${expBadge(it, s)}</div>
       <div class="name">${E(it.name)}${it.isExtra ? ' <span class="tag">ngoài sổ sách</span>' : ''}</div>
       <div class="meta">Lô <b>${E(it.lot)}</b> · ${E(it.warehouse)}</div>
       <div class="meta">NSX ${Util.vnDate(it.prodDate)} · Hạn dùng ${it.shelfLife} ngày · HSD ${Util.vnDate(e.expDate)}</div>
-      <div class="meta">Sổ sách: <b>${F(it.sysQty)}</b> · ${F(it.sysWgh)} kg</div>
+      <div class="meta">Sổ sách: <b>${F(it.sysQty)}</b> · ${F(it.sysWgh)} kg${multi && left != null ? ` · ${left > 0 ? `còn lại <b>${F(left)}</b>` : left === 0 ? '<b class="okc">đủ</b>' : `<b class="over">thừa ${F(-left)}</b>`}` : ''}</div>
       <div class="row gap inputs">
-        <label>SL thực tế<input type="number" inputmode="decimal" step="any" class="aq" value="${it.actualQty == null ? '' : it.actualQty}"></label>
-        <label>KL thực tế (kg)<input type="number" inputmode="decimal" step="any" class="aw" placeholder="${it.actualQty != null ? F(Util.actualWgh(it)) : 'tự tính'}" value="${it.actualWgh == null ? '' : it.actualWgh}"></label>
+        <label>SL thực tế<input type="number" inputmode="decimal" step="any" class="aq" value="${it.actualQty == null ? '' : it.actualQty}" ${multi ? 'readonly' : ''}></label>
+        <label>KL thực tế (kg)<input type="number" inputmode="decimal" step="any" class="aw" placeholder="${it.actualQty != null ? F(Util.actualWgh(it)) : 'tự tính'}" value="${it.actualWgh == null ? '' : it.actualWgh}" ${multi ? 'readonly' : ''}></label>
         <button class="btn small-btn match" title="Đúng như sổ sách">= Sổ</button>
       </div>
       <div class="var">${varText(it)}</div>
+      ${weighList(it)}
+      <div class="addw" hidden>
+        <div class="row gap">
+          <label>Số lượng<input type="number" inputmode="decimal" step="any" class="wq" value="1"></label>
+          <label>Khối lượng cân (kg)<input type="number" inputmode="decimal" step="any" class="ww" placeholder="vd 19.67"></label>
+          <button class="btn small-btn primary wadd">+ Ghi</button>
+        </div>
+      </div>
       <div class="row gap tools">
+        <button class="btn small-btn wbtn">⚖ Cân nhiều lần</button>
         <label class="btn small-btn">📷 Ảnh<input type="file" accept="image/*" capture="environment" class="photo" hidden multiple></label>
         <button class="btn small-btn notebtn">📝 Ghi chú</button>
         ${it.isExtra ? '<button class="btn small-btn del">Xóa dòng</button>' : ''}
@@ -459,6 +527,13 @@
 
   function bindItem(el, s) {
     const it = s.items.find(i => i.id === el.dataset.id);
+    const redraw = (openAdd) => {
+      el.outerHTML = itemCard(it, s);
+      const n = $(`#list .item[data-id="${it.id}"]`);
+      bindItem(n, s);
+      if (openAdd) { n.querySelector('.addw').hidden = false; n.querySelector('.ww').focus(); }
+      updateProgress(s);
+    };
     const refresh = () => {
       el.querySelector('.var').innerHTML = varText(it);
       el.classList.toggle('counted', it.actualQty != null);
@@ -469,10 +544,39 @@
     el.querySelector('.aq').oninput = e => { it.actualQty = numOrNull(e.target.value); refresh(); };
     el.querySelector('.aw').oninput = e => { it.actualWgh = numOrNull(e.target.value); refresh(); };
     el.querySelector('.match').onclick = () => {
+      if ((it.weighs || []).length && !confirm('Dòng này đã có ' + it.weighs.length + ' lần cân / quét. Xóa các lần đó và lấy đúng theo sổ sách?')) return;
+      it.weighs = [];
+      Object.keys(s.scannedTags || {}).forEach(k => { if (s.scannedTags[k] === it.id) delete s.scannedTags[k]; });
       it.actualQty = it.sysQty; it.actualWgh = null;
-      el.querySelector('.aq').value = it.sysQty; el.querySelector('.aw').value = '';
-      refresh();
+      clearSignatures(s); scheduleSave(); redraw();
     };
+    // Cân nhiều lần cho cùng một mã: ghi từng lần, app tự cộng
+    el.querySelector('.wbtn').onclick = () => { const a = el.querySelector('.addw'); a.hidden = !a.hidden; if (!a.hidden) el.querySelector('.ww').focus(); };
+    const addW = () => {
+      const qty = Number(el.querySelector('.wq').value) || 0;
+      const wgh = Number(el.querySelector('.ww').value);
+      if (!(wgh > 0) && !(qty > 0)) return toast('Nhập số lượng hoặc khối lượng', 'err');
+      // Lần cân đầu tiên mà trước đó đã nhập tay: giữ số nhập tay làm lần #1
+      if (!(it.weighs || []).length && it.actualQty != null) {
+        it.weighs = [{ qty: it.actualQty, wgh: Util.actualWgh(it), time: new Date().toISOString(), src: 'manual' }];
+      }
+      it.weighs = it.weighs || [];
+      it.weighs.push({ qty, wgh: wgh || 0, time: new Date().toISOString(), src: 'manual' });
+      Util.applyWeighs(it);
+      clearSignatures(s); scheduleSave(); redraw(true);
+      toast(`Đã ghi lần cân #${it.weighs.length}: tổng ${F(it.actualQty)} ĐV · ${F(it.actualWgh)} kg`);
+    };
+    el.querySelector('.wadd').onclick = addW;
+    el.querySelector('.ww').onkeydown = e => { if (e.key === 'Enter') addW(); };
+    $$('[data-wrm]', el).forEach(b => b.onclick = () => {
+      const i = Number(b.dataset.wrm);
+      const entry = it.weighs[i];
+      if (!confirm(`Xóa lần cân #${i + 1} (${F(entry.wgh)} kg)?`)) return;
+      it.weighs.splice(i, 1);
+      if (entry.tag && s.scannedTags) delete s.scannedTags[entry.tag];
+      if (it.weighs.length) Util.applyWeighs(it); else { it.actualQty = null; it.actualWgh = null; }
+      clearSignatures(s); scheduleSave(); redraw();
+    });
     el.querySelector('.notebtn').onclick = () => { const n = el.querySelector('.note'); n.hidden = !n.hidden; if (!n.hidden) n.focus(); };
     el.querySelector('.note').oninput = e => { it.note = e.target.value; scheduleSave(); };
     el.querySelector('.photo').onchange = async e => {
@@ -485,14 +589,12 @@
         }
         await DB.put('sessions', s);
       }, 'Đang lấy vị trí và đóng dấu ảnh...');
-      el.outerHTML = itemCard(it, s);
-      bindItem($(`#list .item[data-id="${it.id}"]`), s);
+      redraw();
     };
     $$('[data-rm]', el).forEach(b => b.onclick = () => {
       if (!confirm('Xóa ảnh này?')) return;
       it.photos.splice(Number(b.dataset.rm), 1); scheduleSave();
-      el.outerHTML = itemCard(it, s);
-      bindItem($(`#list .item[data-id="${it.id}"]`), s);
+      redraw();
     });
     const del = el.querySelector('.del');
     if (del) del.onclick = () => {
@@ -783,8 +885,8 @@
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000))
       ]);
     } catch (e) { console.warn('minutes images', e); }
-    // Ảnh bìa cắt theo khung ngang của trang bìa (rộng ≈ 1,74 lần cao)
-    const cover = coverOf(s) ? await Util.cropImage(coverOf(s), 523 / 300) : null;
+    // Ảnh bìa cắt theo khung nửa trái trang bìa (slide A4 ngang)
+    const cover = coverOf(s) ? await Util.cropImage(coverOf(s), (841.89 * 0.52) / 595.28) : null;
     return Reports.toBlob(Reports.tripDoc(s, { cover, minutesImages }));
   }
 
@@ -871,7 +973,7 @@
         if (r === false) {
           toast('Máy này không chia sẻ được nhiều file một lúc: dùng nút Chia sẻ ở từng file → OneDrive', 'err');
         } else if (r === 'pdf-only') {
-          toast('Đã gửi các file PDF. File Excel: bấm Tải về rồi tải lên OneDrive.');
+          toast('Đã gửi 3 file PDF. File Excel đã tải về máy: mở app OneDrive → Tải lên vào Output.'); const x = files.excel; Util.download(x.blob, x.name);
         }
       }));
     };
@@ -908,6 +1010,7 @@
         <div class="row gap">
           <label class="btn small-btn">🖼 Chọn logo<input type="file" accept="image/*" id="logoIn" hidden></label>
           ${Branding.logo() ? '<button class="btn small-btn" id="logoRm">Bỏ logo</button>' : ''}
+          ${Branding.custom() ? '<button class="btn small-btn" id="logoDef">Dùng logo mặc định</button>' : ''}
         </div>
       </div>
       <div class="card">
@@ -949,7 +1052,8 @@
       if (!file) return;
       guard(async () => { Branding.setLogo(await Util.readLogo(file)); toast('Đã lưu logo'); renderSettings(); }, 'Đang lưu logo...');
     };
-    if ($('#logoRm')) $('#logoRm').onclick = () => { Branding.setLogo(null); renderSettings(); };
+    if ($('#logoRm')) $('#logoRm').onclick = () => { Branding.setLogo('none'); renderSettings(); };
+    if ($('#logoDef')) $('#logoDef').onclick = () => { Branding.reset(); renderSettings(); };
     $('#addf').onclick = () => $('#facs').insertAdjacentHTML('beforeend', facRow({ code: '', name: '', address: '', inputFile: '' }));
     $('#facs').onchange = e => {
       if (!e.target.matches('.fcov') || !e.target.files[0]) return;
@@ -965,6 +1069,10 @@
     };
     $('#facs').onclick = e => {
       if (e.target.matches('.fdel')) e.target.closest('.fac').remove();
+      if (e.target.matches('.fcovdef')) {
+        Covers.set($('.fc', e.target.closest('.fac')).value.trim(), null);
+        toast('Đã dùng lại ảnh nhà máy mặc định'); renderSettings();
+      }
       if (e.target.matches('.fhere')) {
         const input = $('.fg', e.target.closest('.fac'));
         guard(async () => {
@@ -987,7 +1095,7 @@
         allowedDomains: $('#dom').value.split(',').map(x => x.trim()).filter(Boolean),
         msal: { clientId: $('#cid').value.trim(), tenantId: $('#tid').value.trim() || 'organizations' },
         oneDrive: { inputFolder: $('#inf').value.trim(), outputFolder: $('#outf').value.trim() },
-        factories, committeeRoles,
+        factories, committeeRoles, factoriesVersion: window.APP_DEFAULT_CONFIG.factoriesVersion,
         nearExpiryRatio: Number($('#ratio').value) / 100 || 0.25,
         nearExpiryMinDays: Number($('#mind').value) || 0
       });
@@ -1008,7 +1116,9 @@
       <div class="row gap"><input class="fa" placeholder="Địa chỉ (in trên biên bản)" value="${E(f.address || '')}"><input class="ff" placeholder="Tên file input, vd FDREPORT-333*.xlsx" value="${E(f.inputFile || '')}"></div>
       <div class="row gap"><input class="fg" placeholder="Toạ độ nhà máy: vĩ độ, kinh độ (để đối chiếu ảnh)" value="${f.lat != null && f.lat !== '' ? E(f.lat + ', ' + f.lng) : ''}"><button class="btn small-btn fhere">Lấy vị trí hiện tại</button></div>
       <div class="row gap cov-row">
-        ${f.code && Covers.get(f.code) ? `<img src="${Covers.get(f.code)}" class="cover-thumb small" alt="">` : '<span class="muted small">Chưa có ảnh bìa báo cáo</span>'}
+        ${Covers.get(f.code) ? `<img src="${Covers.get(f.code)}" class="cover-thumb small" alt="">` : '<span class="muted small">Chưa có ảnh bìa báo cáo</span>'}
+        <span class="muted small">${f.code && Covers.custom(f.code) ? 'Ảnh riêng' : 'Ảnh mặc định'}</span>
+        ${f.code && Covers.custom(f.code) ? `<button class="btn small-btn fcovdef">Dùng ảnh mặc định</button>` : ''}
         <label class="btn small-btn">🖼 Ảnh bìa báo cáo<input type="file" accept="image/*" class="fcov" hidden></label>
       </div>
       <button class="btn small-btn fdel">Xóa nhà máy</button>
@@ -1041,6 +1151,7 @@
     setHdr(); window.addEventListener('resize', setHdr);
     $('#settingsBtn').onclick = () => go('#settings');
     $('#net').onclick = () => guard(async () => { const r = await OneDrive.flushOutbox(); toast(`Đã gửi ${r.sent}, còn chờ ${r.pending}`); refreshNet(); }, 'Đang đồng bộ...');
+    await loadDefaultAssets();
     try { await Auth.init(); } catch (e) { toast(e.message, 'err'); }
     window.addEventListener('hashchange', route);
     window.addEventListener('pagehide', () => current && DB.put('sessions', current));

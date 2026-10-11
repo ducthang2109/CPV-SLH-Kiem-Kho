@@ -11,7 +11,9 @@ const Importer = (function () {
     wgh: ['wgh', 'weight', 'khoi luong', 'khối lượng', 'trong luong'],
     ages: ['ages(day)', 'ages', 'tuoi'],
     unit: ['unit', 'uom', 'dvt', 'đvt', 'don vi', 'đơn vị'],
-    shelfLife: ['shelf life ages', 'shelf life', 'shelf_life', 'han su dung', 'hạn sử dụng', 'hsd']
+    shelfLife: ['shelf life ages', 'shelf life', 'shelf_life', 'han su dung', 'hạn sử dụng', 'hsd'],
+    org: ['org_code', 'org', 'ma don vi'],          // mã nhà máy, ví dụ B43210
+    stockDate: ['stk_doc_date', 'stock date', 'ngay ton'] // ngày chốt số liệu tồn
   };
 
   const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -105,7 +107,21 @@ const Importer = (function () {
     const idx = mapHeader(rows[0]);
     const body = rows.slice(1);
     const isTcvn3 = body.some(r => looksTcvn3(r[idx.name]) || looksTcvn3(r[idx.location]));
-    const txt = v => tcvn3ToUnicode(String(v == null ? '' : v).trim(), isTcvn3);
+    // Trong cùng file có dòng TCVN3 lẫn dòng Unicode (ví dụ "Nạc Vai 5kg ĐL"):
+    // có ký tự đặc trưng TCVN3 -> chuyển; có chữ Việt Unicode (ạ, ư, Đ...) -> giữ nguyên; còn lại theo bảng mã chung của file
+    const txt = v => {
+      const s = String(v == null ? '' : v).trim();
+      if (looksTcvn3(s)) return tcvn3ToUnicode(s, true);
+      if (/[Ā-ỿ]/.test(s)) return s;
+      return tcvn3ToUnicode(s, isTcvn3);
+    };
+    const orgCode = idx.org != null ? String(body[0][idx.org] || '').trim() : '';
+    const stockDate = idx.stockDate != null ? parseDate(body[0][idx.stockDate]) : null;
+    // Cột Unit trong file hệ thống là mã 1 ký tự (vd "D"), không phải tên đơn vị -> đoán theo tên hàng
+    const unitOf = r => {
+      const u = idx.unit != null ? txt(r[idx.unit]) : '';
+      return u.length > 1 ? u : guessUnit(txt(r[idx.name]));
+    };
 
     const sites = new Set();
     const items = body.map((r, i) => {
@@ -115,7 +131,7 @@ const Importer = (function () {
         id: 'L' + (i + 1),
         code: txt(r[idx.code]),
         name: idx.name != null ? txt(r[idx.name]) : '',
-        unit: idx.unit != null && r[idx.unit] !== '' ? txt(r[idx.unit]) : guessUnit(txt(r[idx.name])),
+        unit: unitOf(r),
         lot: String(r[idx.lot]).trim(),
         warehouseCode: loc.code,
         warehouse: loc.full,
@@ -132,7 +148,7 @@ const Importer = (function () {
       };
     }).filter(it => it.code);
 
-    return { fileName, importedAt: new Date().toISOString(), encoding: isTcvn3 ? 'TCVN3' : 'Unicode', sites: [...sites], items };
+    return { fileName, importedAt: new Date().toISOString(), encoding: isTcvn3 ? 'TCVN3' : 'Unicode', sites: [...sites], orgCode, stockDate, items };
   }
 
   return { parse, parseDate, parseLocation };

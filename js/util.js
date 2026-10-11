@@ -24,6 +24,41 @@ const Util = (function () {
     return { status: 'ok', label: `Còn hạn ${daysLeft} ngày`, expDate, daysLeft };
   }
 
+  // Nhiều lần cân / quét tem cho một dòng hàng: SL và KL thực tế = tổng các lần
+  function applyWeighs(item) {
+    const w = item.weighs || [];
+    if (!w.length) return;
+    item.actualQty = round(w.reduce((a, x) => a + (Number(x.qty) || 0), 0));
+    item.actualWgh = round(w.reduce((a, x) => a + (Number(x.wgh) || 0), 0));
+  }
+
+  // Đọc nội dung tem QR: tìm số lô / mã hàng có trong danh sách, khối lượng (số thập phân, ưu tiên số đứng trước "kg")
+  function parseLabel(text, items) {
+    const t = String(text || '').trim();
+    const up = t.toUpperCase();
+    const byLot = items.filter(i => i.lot && up.includes(String(i.lot).toUpperCase()));
+    const byCode = items.filter(i => i.code && up.includes(String(i.code).toUpperCase()));
+    let candidates = byLot.length ? byLot : byCode;
+    if (byLot.length && byCode.length) {
+      const both = byLot.filter(i => byCode.includes(i));
+      if (both.length) candidates = both;
+    }
+    // Nhiều dòng cùng lô (khác mã hàng): thử khớp thêm theo tên hàng
+    if (candidates.length > 1) {
+      const low = t.toLowerCase();
+      const byName = candidates.filter(i => i.name && low.includes(i.name.toLowerCase()));
+      if (byName.length) candidates = byName;
+    }
+    let wgh = null;
+    const kg = t.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
+    if (kg) wgh = Number(kg[1].replace(',', '.'));
+    else {
+      const dec = t.match(/(?:^|[^\d])(\d{1,4}[.,]\d{1,3})(?!\d)/);
+      if (dec) wgh = Number(dec[1].replace(',', '.'));
+    }
+    return { text: t, item: candidates.length === 1 ? candidates[0] : null, candidates, wgh };
+  }
+
   // Khối lượng thực tế: nếu không cân lại thì ước theo khối lượng bình quân/đơn vị trong sổ sách
   function actualWgh(item) {
     if (item.actualQty == null) return null;
@@ -133,7 +168,9 @@ const Util = (function () {
   }
 
   function share(blob, name) {
-    if (canShareFile(blob, name)) {
+    // Android chỉ cho chia sẻ PDF/ảnh; chia sẻ file Excel sẽ bị "Permission denied" nên tải về luôn
+    const shareable = isIOS || blob.type === 'application/pdf' || /^image\//.test(blob.type);
+    if (shareable && canShareFile(blob, name)) {
       return navigator.share({ files: [new File([blob], name, { type: blob.type })], title: name })
         .then(() => true)
         .catch(e => {
@@ -148,22 +185,24 @@ const Util = (function () {
     return Promise.resolve(false);
   }
 
-  // Chia sẻ nhiều file một lần (để lưu cả bộ vào OneDrive qua app OneDrive). Trả về false nếu máy không hỗ trợ.
+  // Chia sẻ cả bộ file một lần (để lưu vào OneDrive qua app OneDrive).
+  // Chrome Android báo "Permission denied" khi chia sẻ file Excel, nên chỉ chia sẻ các file PDF;
+  // nếu máy vẫn chặn thì tải tất cả file về máy để không mất file. Trả về false nếu máy không hỗ trợ chia sẻ file.
   function shareMany(list) {
-    const files = list.map(f => new File([f.blob], f.name, { type: f.blob.type }));
+    const pdfs = list.filter(f => f.blob.type === 'application/pdf').map(f => new File([f.blob], f.name, { type: 'application/pdf' }));
     let ok = false;
-    try { ok = !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { ok = false; }
-    if (!ok) {
-      // Thử bỏ các loại máy không cho chia sẻ (ví dụ Excel trên Android)
-      const pdfs = files.filter(f => f.type === 'application/pdf');
-      try { ok = pdfs.length && navigator.canShare && navigator.canShare({ files: pdfs }); } catch (e) { ok = false; }
-      if (!ok) return Promise.resolve(false);
-      return navigator.share({ files: pdfs, title: 'Báo cáo kiểm kê' }).then(() => 'pdf-only').catch(e => { if (e.name === 'AbortError') return 'cancel'; throw e; });
-    }
-    return navigator.share({ files, title: 'Báo cáo kiểm kê' }).then(() => true).catch(e => { if (e.name === 'AbortError') return 'cancel'; throw e; });
+    try { ok = !!(pdfs.length && navigator.canShare && navigator.canShare({ files: pdfs })); } catch (e) { ok = false; }
+    if (!ok) return Promise.resolve(false);
+    return navigator.share({ files: pdfs, title: 'Báo cáo kiểm kê' })
+      .then(() => (pdfs.length < list.length ? 'pdf-only' : true))
+      .catch(e => {
+        if (e.name === 'AbortError') return 'cancel';
+        list.forEach(f => anchorDownload(f.blob, f.name));
+        throw new Error('Máy không cho chia sẻ (' + e.name + '). Đã tải ' + list.length + ' file về thư mục Tải xuống, mở app OneDrive → Tải lên để lưu vào Output.');
+      });
   }
 
   const safeName = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w.-]+/g, '_');
 
-  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, compressImage, cropImage, readLogo, sha256, download, share, shareMany, openExternal, safeName, isIOS, inAppBrowser, canShareFile };
+  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, applyWeighs, parseLabel, compressImage, cropImage, readLogo, sha256, download, share, shareMany, openExternal, safeName, isIOS, inAppBrowser, canShareFile };
 })();
