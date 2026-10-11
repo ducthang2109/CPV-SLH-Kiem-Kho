@@ -7,3 +7,4 @@ Thumbs.db
 *.xls
 sample/
 docs/sample-output/
+_test/

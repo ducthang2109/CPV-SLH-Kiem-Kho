@@ -57,10 +57,15 @@ const Reports = (function () {
     return s.storeTitle || [...new Set(s.items.map(whName))].join(' & ');
   }
 
-  // Đầu trang giống biên bản mẫu: tên công ty / chi nhánh / địa chỉ
+  // Màu xanh theo logo C.P Slaughter House
+  const GREEN = '#0a7a3c', GREEN_LIGHT = '#e6f4ea', GREEN_MID = '#c3e6cc';
+
+  // Đầu trang giống biên bản mẫu: (logo) tên công ty / chi nhánh / địa chỉ
   function headerBlock(s, rightText) {
+    const logo = Branding.logo();
     return {
       columns: [
+        logo ? { width: 120, image: logo, fit: [120, 40], margin: [0, 0, 8, 0] } : { width: 0, text: '' },
         { width: '*', fontSize: 9, stack: [
           { text: s.companyName, bold: true },
           { text: s.factory.name },
@@ -114,7 +119,7 @@ const Reports = (function () {
     let stt = 0;
     for (const list of byWarehouse(items).values()) {
       const w = list[0];
-      body.push([{ text: `Warehouse : ${w.warehouseCode}   ${whName(w)}`, colSpan: 12, bold: true, decoration: 'underline', fontSize: 8 }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}]);
+      body.push([{ text: `Warehouse : ${w.warehouseCode}   ${whName(w)}`, colSpan: 12, bold: true, decoration: 'underline', fontSize: 8, fillColor: GREEN_LIGHT }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}]);
       list.forEach(it => {
         stt++;
         const v = it.var;
@@ -134,12 +139,13 @@ const Reports = (function () {
         ]);
       });
       const t = tot(list);
-      body.push(['', '', { text: 'Tổng Cộng', bold: true, alignment: 'center' }, '', '',
-        ...[Q(t[0]), N(t[1], 2), Q(t[2]), N(t[3], 2), D(Util.round(t[4])), D(Util.round(t[5]), 2)].map((x, i) => ({ text: x, bold: true, alignment: i > 3 ? 'center' : 'right' })), '']);
+      const tc = { fillColor: GREEN_MID };
+      body.push([Object.assign({ text: '' }, tc), Object.assign({ text: '' }, tc), { text: 'Tổng Cộng', bold: true, alignment: 'center', fillColor: GREEN_MID }, Object.assign({ text: '' }, tc), Object.assign({ text: '' }, tc),
+        ...[Q(t[0]), N(t[1], 2), Q(t[2]), N(t[3], 2), D(Util.round(t[4])), D(Util.round(t[5]), 2)].map((x, i) => ({ text: x, bold: true, alignment: i > 3 ? 'center' : 'right', fillColor: GREEN_MID })), Object.assign({ text: '' }, tc)]);
     }
     const g = tot(items);
-    body.push([{ text: 'TỔNG', colSpan: 5, bold: true, alignment: 'center', fontSize: 8 }, {}, {}, {}, {},
-      ...[Q(g[0]), N(g[1], 2), Q(g[2]), N(g[3], 2), D(Util.round(g[4])), D(Util.round(g[5]), 2)].map((x, i) => ({ text: x, bold: true, alignment: i > 3 ? 'center' : 'right' })), '']);
+    body.push([{ text: 'TỔNG', colSpan: 5, bold: true, alignment: 'center', fontSize: 8, fillColor: GREEN, color: '#fff' }, {}, {}, {}, {},
+      ...[Q(g[0]), N(g[1], 2), Q(g[2]), N(g[3], 2), D(Util.round(g[4])), D(Util.round(g[5]), 2)].map((x, i) => ({ text: x, bold: true, alignment: i > 3 ? 'center' : 'right', fillColor: GREEN, color: '#fff' })), { text: '', fillColor: GREEN }]);
 
     const content = [
       headerBlock(s, withSignatures ? [] : [{ text: 'Bản ký tay' }]),
@@ -172,7 +178,7 @@ const Reports = (function () {
       styles: {
         title: { fontSize: 15, bold: true, alignment: 'center', margin: [0, 2, 0, 2] },
         h2: { fontSize: 11, bold: true, margin: [0, 8, 0, 4] },
-        th: { alignment: 'center', fontSize: 7 }
+        th: { alignment: 'center', fontSize: 7, bold: true, color: '#fff', fillColor: GREEN }
       },
       footer: p => ({ text: String(p), alignment: 'center', fontSize: 7, margin: [0, 10, 0, 0] }),
       info: { title: 'Biên bản kiểm kê ' + docNo(s) },
@@ -217,50 +223,109 @@ const Reports = (function () {
     return out;
   }
 
-  // ---------- Báo cáo kiểm kê: trang bìa / nội dung / Thank You ----------
+  // ---------- Báo cáo kiểm kê: trang bìa / nội dung / hình ảnh / Thank You ----------
   // opts.minutesImages: ảnh các trang biên bản đã ký; opts.cover: ảnh bìa nhà máy
   function tripDoc(s, opts = {}) {
     const { items, sum } = summary(s);
     const tr = s.trip || {};
     const user = s.user || {};
-    const BRAND = '#0b3d91', ACCENT = '#f5b400';
-    const W = 595.28, Hh = 841.89;
+    const ACCENT = '#f39200';
+    const W = 595.28, Hh = 841.89, M = 36, CW = W - 2 * M;
+    const logo = Branding.logo();
     const p = (t, o = {}) => Object.assign({ text: t, margin: [0, 2, 0, 2] }, o);
     const cover = opts.cover || s.coverPhoto || (s.checkIn && s.checkIn.data) || null;
     const st = startTime(s), en = endTime(s);
-    const inspectors = s.committee.filter(m => m.name).map(m => `${m.name}${m.role ? ' – ' + m.role : ''}`);
 
-    // ===== Trang 1: bìa =====
+    // Header mỗi trang: logo bên trái, tên báo cáo bên phải, gạch xanh bên dưới (trừ trang Thank You)
+    const header = (pg, n) => pg === n ? null : {
+      margin: [M, 14, M, 0],
+      stack: [
+        {
+          columns: [
+            logo ? { width: 150, image: logo, fit: [150, 38] } : { width: '*', text: s.companyName, bold: true, color: GREEN, fontSize: 10 },
+            { width: '*', alignment: 'right', fontSize: 8, color: '#555', stack: [
+              { text: 'BÁO CÁO KIỂM KÊ', bold: true, color: GREEN, fontSize: 9 },
+              { text: `${s.factory.name} · ${Util.vnDate(s.countDate)}` }
+            ], margin: [0, 8, 0, 0] }
+          ]
+        },
+        { canvas: [{ type: 'line', x1: 0, y1: 4, x2: CW, y2: 4, lineWidth: 1.5, lineColor: GREEN }] }
+      ]
+    };
+
+    const section = (t, brk = true) => ({
+      table: { widths: ['*'], body: [[{ text: t, color: '#fff', bold: true, fontSize: 13, fillColor: GREEN, margin: [8, 4, 8, 4] }]] },
+      layout: 'noBorders', margin: [0, 0, 0, 8], pageBreak: brk ? 'before' : undefined
+    });
+    const photoGrid = (list, size = [250, 230]) => {
+      const out = [];
+      for (let i = 0; i < list.length; i += 2) {
+        out.push({
+          columns: list.slice(i, i + 2).map(x => ({ width: '*', stack: [{ image: x.data, fit: size }, { text: x.caption || '', fontSize: 8, color: '#444', margin: [0, 2, 0, 0] }] })).concat(list.length - i === 1 ? [{ width: '*', text: '' }] : []),
+          columnGap: 14, margin: [0, 0, 0, 10], unbreakable: true
+        });
+      }
+      return out;
+    };
+
+    // ===== Trang 1: bìa — ảnh nhà máy ở trên, tiêu đề, thông tin =====
     const infoRow = (k, v) => [{ text: k, color: '#5f6b7a', fontSize: 10 }, { text: v || '', bold: true, fontSize: 11 }];
-    const coverPage = [
-      { canvas: [{ type: 'rect', x: 0, y: 0, w: W, h: 150, color: BRAND }, { type: 'rect', x: 0, y: 150, w: W, h: 6, color: ACCENT }], absolutePosition: { x: 0, y: 0 } },
-      { text: s.companyName.toUpperCase(), color: '#ffffff', fontSize: 11, bold: true, absolutePosition: { x: 40, y: 34 } },
-      { text: s.factory.name, color: '#dbe6ff', fontSize: 10, absolutePosition: { x: 40, y: 52 } },
-      { text: 'BÁO CÁO KIỂM KÊ', color: '#ffffff', fontSize: 30, bold: true, absolutePosition: { x: 40, y: 80 } },
-      { text: 'Hàng tồn kho · ' + Util.vnDate(s.countDate), color: '#ffd76a', fontSize: 12, absolutePosition: { x: 42, y: 118 } },
+    const content = [
       cover
-        ? { image: cover, fit: [W - 80, 340], alignment: 'center', margin: [0, 140, 0, 18] }
-        : { canvas: [{ type: 'rect', x: 0, y: 0, w: W - 80, h: 260, color: '#e8eef8' }], margin: [0, 140, 0, 18] },
+        ? { image: cover, width: CW, height: 300, margin: [0, 6, 0, 0] }
+        : { canvas: [{ type: 'rect', x: 0, y: 0, w: CW, h: 300, color: GREEN_LIGHT }], margin: [0, 6, 0, 0] },
+      {
+        table: { widths: ['*'], body: [[{
+          stack: [
+            { text: 'BÁO CÁO KIỂM KÊ', fontSize: 30, bold: true, color: '#fff' },
+            { text: 'Hàng tồn kho · ' + storeTitle(s), fontSize: 12, color: '#d6f5e1', margin: [0, 2, 0, 0] }
+          ], fillColor: GREEN, margin: [16, 14, 16, 14]
+        }]] },
+        layout: 'noBorders'
+      },
+      { canvas: [{ type: 'rect', x: 0, y: 0, w: CW, h: 5, color: ACCENT }], margin: [0, 0, 0, 14] },
       {
         table: {
-          widths: [110, '*'],
+          widths: [120, '*'],
           body: [
             infoRow('Ngày kiểm kê', dateWords(s.countDate).replace(/^ngày/, 'Ngày')),
             infoRow('Nhà máy', s.factory.name),
-            s.factory.address ? infoRow('Địa chỉ', s.factory.address) : infoRow('', ''),
+            infoRow('Địa chỉ', s.factory.address || ''),
             infoRow('Kho kiểm kê', storeTitle(s)),
-            infoRow('Người kiểm tra', `${user.name || ''}${user.email ? ' (' + user.email + ')' : ''}`),
             infoRow('Thời gian', `${hm(st)}${en ? ' – ' + hm(en) : ''}`),
             infoRow('Số biên bản', docNo(s))
           ]
         },
-        layout: { hLineWidth: (i, node) => (i === 0 || i === node.table.body.length) ? 0 : 0.5, vLineWidth: () => 0, hLineColor: () => '#d5dce6', paddingTop: () => 5, paddingBottom: () => 5 },
-        margin: [0, 0, 0, 0]
+        layout: { hLineWidth: (i, node) => (i === 0 || i === node.table.body.length) ? 0 : 0.5, vLineWidth: () => 0, hLineColor: () => '#d5dce6', paddingTop: () => 5, paddingBottom: () => 5 }
       },
-      { text: '', pageBreak: 'after' }
+      {
+        table: { widths: ['*'], body: [[{
+          text: [{ text: 'Người kiểm tra:  ', color: '#fff' }, { text: `${user.name || ''}${user.email ? '  (' + user.email + ')' : ''}`, bold: true, color: '#fff' }],
+          fillColor: ACCENT, fontSize: 12, margin: [12, 8, 12, 8]
+        }]] },
+        layout: 'noBorders', margin: [0, 12, 0, 0]
+      }
     ];
 
-    // ===== Trang nội dung =====
+    // ===== 1. Biên bản có chữ ký =====
+    content.push(section('1. BIÊN BẢN KIỂM KÊ (CÓ CHỮ KÝ)'));
+    content.push(p(`Đã kiểm ${sum.counted}/${sum.lines} dòng hàng tại ${byWarehouse(items).size} kho. Trọng lượng sổ sách ${F(sum.sysWgh)} kg, thực tế ${F(sum.actWgh)} kg. ${sum.overLines} dòng thừa, ${sum.shortLines} dòng thiếu, ${sum.expired} dòng hết hạn, ${sum.near} dòng sắp hết hạn.`, { fontSize: 10 }));
+    if (opts.minutesImages && opts.minutesImages.length) {
+      opts.minutesImages.forEach((img, i) => content.push({ image: img, fit: [CW, Hh - 190], alignment: 'center', margin: [0, 4, 0, 0], pageBreak: i > 0 ? 'before' : undefined }));
+    } else {
+      content.push(p('Xem file biên bản kiểm kê đã ký kèm theo: ' + fileNames(s).signed, { italics: true }));
+    }
+
+    // ===== 2. Hình ảnh nội dung kiểm kê: có mặt, hiện trường =====
+    content.push(section('2. HÌNH ẢNH NỘI DUNG KIỂM KÊ'));
+    const scene = [];
+    if (s.checkIn) scene.push({ data: s.checkIn.data, caption: `Bắt đầu kiểm kê – ${Stamp.dt(new Date(s.checkIn.time))} – ${Geo.fmt(s.checkIn.geo)}` });
+    if (s.checkOut) scene.push({ data: s.checkOut.data, caption: `Kết thúc kiểm kê – ${Stamp.dt(new Date(s.checkOut.time))} – ${Geo.fmt(s.checkOut.geo)}` });
+    (s.generalPhotos || []).forEach(g => scene.push({ data: g.data, caption: g.caption || 'Hình ảnh hiện trường' }));
+    if (scene.length) content.push(...photoGrid(scene));
+    else content.push(p('Không có ảnh.', { italics: true }));
+
+    // ===== 3. Hình ảnh một số sản phẩm kiểm kho =====
     const issueOf = it => {
       const v = it.var;
       const tags = [];
@@ -274,88 +339,66 @@ const Reports = (function () {
       return tags;
     };
     const issues = items.filter(it => issueOf(it).some(t => t.t !== 'Chưa kiểm'));
-    const uncounted = items.filter(i => i.actualQty == null);
-
-    const section = t => ({ text: t, fontSize: 14, bold: true, color: BRAND, margin: [0, 6, 0, 6] });
-    const photoGrid = (list) => {
-      const out = [];
-      for (let i = 0; i < list.length; i += 2) {
-        out.push({
-          columns: list.slice(i, i + 2).map(x => ({ width: '*', stack: [{ image: x.data, fit: [250, 230] }, { text: x.caption || '', fontSize: 8, color: '#444', margin: [0, 2, 0, 0] }] })).concat(list.length - i === 1 ? [{ width: '*', text: '' }] : []),
-          columnGap: 14, margin: [0, 0, 0, 10], unbreakable: true
-        });
-      }
-      return out;
-    };
-
-    const content = [...coverPage];
-
-    // 1. Biên bản có chữ ký
-    content.push(section('1. BIÊN BẢN KIỂM KÊ (CÓ CHỮ KÝ)'));
-    content.push(p(`Đã kiểm ${sum.counted}/${sum.lines} dòng hàng tại ${byWarehouse(items).size} kho. Trọng lượng sổ sách ${F(sum.sysWgh)} kg, thực tế ${F(sum.actWgh)} kg. ${sum.overLines} dòng thừa, ${sum.shortLines} dòng thiếu, ${sum.expired} dòng hết hạn, ${sum.near} dòng sắp hết hạn.`, { fontSize: 10 }));
-    if (opts.minutesImages && opts.minutesImages.length) {
-      opts.minutesImages.forEach((img, i) => content.push({ image: img, fit: [W - 72, Hh - 150], alignment: 'center', margin: [0, 6, 0, 0], pageBreak: i > 0 ? 'before' : undefined }));
-    } else {
-      content.push(p('Xem file biên bản kiểm kê đã ký kèm theo: ' + fileNames(s).signed, { italics: true }));
-    }
-
-    // 2. Hình ảnh một số sản phẩm kiểm kho
-    const productPhotos = [];
-    if (s.checkIn) productPhotos.push({ data: s.checkIn.data, caption: `Bắt đầu kiểm kê – ${Stamp.dt(new Date(s.checkIn.time))} – ${Geo.fmt(s.checkIn.geo)}` });
-    if (s.checkOut) productPhotos.push({ data: s.checkOut.data, caption: `Kết thúc kiểm kê – ${Stamp.dt(new Date(s.checkOut.time))} – ${Geo.fmt(s.checkOut.geo)}` });
     const issueIds = new Set(issues.map(i => i.id));
+    const productPhotos = [];
     items.filter(it => !issueIds.has(it.id) && (it.photos || []).length).forEach(it =>
       it.photos.forEach(ph => productPhotos.push({ data: ph, caption: `${it.code} – ${it.name} – Lô ${it.lot}` })));
-    (s.generalPhotos || []).forEach(g => productPhotos.push({ data: g.data, caption: g.caption || 'Hình ảnh hiện trường' }));
-    content.push(Object.assign(section('2. HÌNH ẢNH KIỂM KHO'), { pageBreak: 'before' }));
+    content.push(section('3. HÌNH ẢNH SẢN PHẨM KIỂM KHO'));
     if (productPhotos.length) content.push(...photoGrid(productPhotos));
-    else content.push(p('Không có ảnh.', { italics: true }));
+    else content.push(p('Không có ảnh sản phẩm (ngoài các ảnh ở phần Vấn đề phát sinh).', { italics: true }));
 
-    // 3. Vấn đề phát sinh
-    content.push(Object.assign(section('3. VẤN ĐỀ PHÁT SINH'), { pageBreak: 'before' }));
+    // ===== 4. Vấn đề phát sinh =====
+    const uncounted = items.filter(i => i.actualQty == null);
+    content.push(section('4. VẤN ĐỀ PHÁT SINH'));
     if (!issues.length && !uncounted.length) content.push(p('Không có vấn đề phát sinh: số lượng khớp sổ sách, không có hàng hết hạn.'));
     issues.forEach((it, n) => {
       const v = it.var;
-      const tags = issueOf(it);
       const block = [
-        { text: [{ text: `${n + 1}. ${it.code} – ${it.name}  `, bold: true }, ...tags.map(t => ({ text: ` ${t.t} `, color: '#fff', background: t.c, bold: true, fontSize: 8 })).flatMap(x => [x, ' '])], fontSize: 10 },
+        { text: [{ text: `${n + 1}. ${it.code} – ${it.name}  `, bold: true }, ...issueOf(it).flatMap(t => [{ text: ` ${t.t} `, color: '#fff', background: t.c, bold: true, fontSize: 8 }, ' '])], fontSize: 10 },
         { text: `Lô ${it.lot} · ${it.warehouse} · NSX ${Util.vnDate(it.prodDate)} · HSD ${Util.vnDate(it.exp.expDate)} (${it.exp.label})`, fontSize: 8, color: '#555', margin: [0, 1, 0, 2] },
         v ? { text: `Sổ sách ${F(it.sysQty)} / ${F(it.sysWgh)} kg   |   Thực tế ${F(it.actualQty)} / ${F(it.aWgh)} kg   |   Chênh lệch ${signed(v.qty)} / ${signed(v.wgh)} kg`, fontSize: 9 } : '',
         it.note ? { text: [{ text: 'Ghi chú: ', bold: true }, it.note], fontSize: 9, margin: [0, 2, 0, 0] } : ''
       ];
       content.push({ stack: block, margin: [0, 6, 0, 4], unbreakable: true });
       if ((it.photos || []).length) content.push(...photoGrid(it.photos.map(ph => ({ data: ph, caption: `${it.code} – Lô ${it.lot}` }))));
-      content.push({ canvas: [{ type: 'line', x1: 0, y1: 0, x2: W - 72, y2: 0, lineWidth: 0.5, lineColor: '#d5dce6' }], margin: [0, 2, 0, 2] });
+      content.push({ canvas: [{ type: 'line', x1: 0, y1: 0, x2: CW, y2: 0, lineWidth: 0.5, lineColor: '#d5dce6' }], margin: [0, 2, 0, 2] });
     });
     if (uncounted.length) content.push(p(`Chưa kiểm ${uncounted.length} dòng: ` + uncounted.map(i => `${i.code}/${i.lot}`).join(', '), { fontSize: 9, color: '#555' }));
 
-    content.push({ text: 'Kết luận', bold: true, fontSize: 11, color: BRAND, margin: [0, 10, 0, 2] });
-    content.push(p(tr.conclusion || '........................................................................................................'));
-    content.push({ text: 'Kiến nghị', bold: true, fontSize: 11, color: BRAND, margin: [0, 8, 0, 2] });
-    content.push(p(tr.recommendation || '........................................................................................................'));
     content.push({
-      columns: [{ width: '*', text: '' }, { width: 200, alignment: 'center', stack: [
-        { text: dateWords(s.countDate), italics: true, fontSize: 9 },
-        { text: 'NGƯỜI KIỂM TRA', bold: true },
-        s.reporterSignature ? { image: s.reporterSignature, fit: [120, 50], margin: [0, 4, 0, 2] } : { text: ' ', margin: [0, 25, 0, 25] },
-        { text: user.name || '', bold: true }
-      ] }], margin: [0, 12, 0, 0], unbreakable: true
+      unbreakable: true, stack: [
+        { text: 'Kết luận', bold: true, fontSize: 11, color: GREEN, margin: [0, 10, 0, 2] },
+        p(tr.conclusion || '........................................................................................................'),
+        { text: 'Kiến nghị', bold: true, fontSize: 11, color: GREEN, margin: [0, 8, 0, 2] },
+        p(tr.recommendation || '........................................................................................................'),
+        {
+          columns: [{ width: '*', text: '' }, { width: 200, alignment: 'center', stack: [
+            { text: dateWords(s.countDate), italics: true, fontSize: 9 },
+            { text: 'NGƯỜI KIỂM TRA', bold: true },
+            s.reporterSignature ? { image: s.reporterSignature, fit: [120, 50], margin: [0, 4, 0, 2] } : { text: ' ', margin: [0, 25, 0, 25] },
+            { text: user.name || '', bold: true }
+          ] }], margin: [0, 10, 0, 0]
+        }
+      ]
     });
 
     // ===== Trang cuối: Thank You =====
     content.push(
       { text: '', pageBreak: 'before' },
-      { canvas: [{ type: 'rect', x: 0, y: 0, w: W, h: Hh, color: BRAND }, { type: 'rect', x: 0, y: Hh / 2 + 70, w: W, h: 6, color: ACCENT }], absolutePosition: { x: 0, y: 0 } },
+      { canvas: [{ type: 'rect', x: 0, y: 0, w: W, h: Hh, color: GREEN }, { type: 'rect', x: 0, y: Hh / 2 + 70, w: W, h: 6, color: ACCENT }], absolutePosition: { x: 0, y: 0 } },
+      logo ? { canvas: [{ type: 'rect', x: 0, y: 0, w: 300, h: 100, r: 10, color: '#ffffff' }], absolutePosition: { x: (W - 300) / 2, y: 150 } } : '',
+      logo ? { image: logo, fit: [270, 80], absolutePosition: { x: (W - 270) / 2, y: 160 } } : '',
       { text: 'THANK YOU', color: '#ffffff', fontSize: 54, bold: true, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 - 70 } },
-      { text: 'Xin cảm ơn!', color: '#ffd76a', fontSize: 18, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 5 } },
+      { text: 'Xin cảm ơn!', color: '#ffe0a8', fontSize: 18, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 5 } },
       { text: s.companyName, color: '#ffffff', fontSize: 11, bold: true, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 100 } },
-      { text: `${s.factory.name} · ${Util.vnDate(s.countDate)}`, color: '#dbe6ff', fontSize: 10, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 118 } }
+      { text: `${s.factory.name} · ${Util.vnDate(s.countDate)}`, color: '#d6f5e1', fontSize: 10, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 118 } }
     );
 
     return {
-      pageSize: 'A4', pageMargins: [36, 36, 36, 36],
+      pageSize: 'A4', pageMargins: [M, 72, M, 36],
       defaultStyle: { font: 'Roboto', fontSize: 10 },
-      footer: (pg, n) => (pg === 1 || pg === n) ? null : ({ text: `Báo cáo kiểm kê ${docNo(s)}   ·   ${pg}/${n}`, alignment: 'right', fontSize: 7, color: '#777', margin: [0, 10, 36, 0] }),
+      header,
+      footer: (pg, n) => (pg === n) ? null : ({ text: `Báo cáo kiểm kê ${docNo(s)}   ·   ${pg}/${n}`, alignment: 'right', fontSize: 7, color: '#777', margin: [0, 10, M, 0] }),
       info: { title: 'Báo cáo kiểm kê ' + docNo(s) },
       content
     };

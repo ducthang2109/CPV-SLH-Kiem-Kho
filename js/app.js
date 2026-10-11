@@ -267,7 +267,10 @@
       <div class="sticky">
         <div class="row between small"><span>Ngày kiểm kê: <b>${Util.vnDate(s.countDate)}</b></span><span id="prog"></span></div>
         <div class="progress"><div id="bar"></div></div>
-        <input id="q" type="search" placeholder="Tìm mã hàng, tên, số lô..." value="${E(filters.q)}">
+        <div class="row gap search-row">
+          <input id="q" type="search" placeholder="Tìm mã hàng, tên, số lô..." value="${E(filters.q)}">
+          <button class="btn small-btn" id="scan" title="Quét mã vạch / QR trên nhãn">▦ Quét</button>
+        </div>
         <div class="row gap">
           <select id="wh"><option value="">Tất cả kho (${whs.length})</option>${whs.map(w => `<option ${w === filters.wh ? 'selected' : ''}>${E(w)}</option>`).join('')}</select>
           <select id="st">
@@ -283,6 +286,7 @@
         <button class="btn primary" id="review">Xem lại & ký ›</button>
       </div>`;
     $('#q').oninput = e => { filters.q = e.target.value; filters.limit = 80; drawList(); };
+    $('#scan').onclick = () => scanCode(s, text => { $('#q').value = text; filters.q = text; filters.limit = 80; drawList(); });
     $('#wh').onchange = e => { filters.wh = e.target.value; filters.limit = 80; drawList(); };
     $('#st').onchange = e => { filters.st = e.target.value; filters.limit = 80; drawList(); };
     $('#add').onclick = () => addExtra(s);
@@ -340,6 +344,29 @@
         renderCount(s.id);
       }, 'Đang lấy vị trí và đóng dấu ảnh...');
     };
+  }
+
+  // Quét mã vạch / QR trên nhãn thùng để tìm nhanh dòng hàng (thư viện html5-qrcode, chạy offline)
+  function scanCode(s, onFound) {
+    if (typeof Html5Qrcode === 'undefined') return toast('Không tải được bộ quét mã', 'err');
+    const d = document.createElement('div');
+    d.className = 'modal';
+    d.innerHTML = `<div class="card"><h3>Quét mã trên nhãn</h3><div id="reader"></div>
+      <p class="muted small">Đưa mã vạch hoặc QR (mã hàng / số lô) vào khung.</p>
+      <button class="btn block" id="scanClose">Đóng</button></div>`;
+    document.body.appendChild(d);
+    const q = new Html5Qrcode('reader');
+    const close = () => { q.isScanning ? q.stop().catch(() => {}).finally(() => d.remove()) : d.remove(); };
+    $('#scanClose', d).onclick = close;
+    q.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 160 } }, text => {
+      text = String(text).trim();
+      // Nhãn có thể chứa cả chuỗi dài: tìm số lô hoặc mã hàng nằm trong đó
+      const hit = s.items.find(i => i.lot && text.includes(i.lot)) || s.items.find(i => i.code && text.toUpperCase().includes(i.code.toUpperCase()));
+      if (navigator.vibrate) navigator.vibrate(80);
+      close();
+      onFound(hit ? (text.includes(hit.lot) ? hit.lot : hit.code) : text);
+      toast(hit ? `Tìm thấy ${hit.code} – lô ${hit.lot}` : 'Không thấy mã này trong danh sách, đã điền vào ô tìm kiếm');
+    }, () => {}).catch(e => { toast('Không mở được camera: ' + (e.message || e), 'err'); d.remove(); });
   }
 
   function signedWarning(s) {
@@ -756,7 +783,9 @@
         new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000))
       ]);
     } catch (e) { console.warn('minutes images', e); }
-    return Reports.toBlob(Reports.tripDoc(s, { cover: coverOf(s), minutesImages }));
+    // Ảnh bìa cắt theo khung ngang của trang bìa (rộng ≈ 1,74 lần cao)
+    const cover = coverOf(s) ? await Util.cropImage(coverOf(s), 523 / 300) : null;
+    return Reports.toBlob(Reports.tripDoc(s, { cover, minutesImages }));
   }
 
   async function buildFiles(s) {
@@ -783,6 +812,14 @@
         <h3>${E(Reports.docNo(s))}</h3>
         <p class="small">${E(s.factory.name)} · ${Util.vnDate(s.countDate)} · kết thúc ${Util.vnDateTime(s.finishedAt)}<br>
         Đã kiểm ${sum.counted}/${sum.lines} dòng · ${sum.overLines} thừa · ${sum.shortLines} thiếu · ${sum.expired} hết hạn · ${sum.near} sắp hết hạn</p>
+      </div>
+      <div class="card od-card">
+        <h3>Lưu vào OneDrive / Output</h3>
+        ${ms ? `<p class="small">Gửi cả 4 file thẳng vào thư mục <b>${E(Config.get().oneDrive.outputFolder)}</b> trên OneDrive.</p>
+          <button class="btn primary block" id="odall">☁ Lưu tất cả vào OneDrive Output</button>` : `
+          <p class="small">Bấm nút dưới → chọn <b>OneDrive</b> trong bảng chia sẻ → mở thư mục <b>Apps Kiem Kho › Output</b> → <b>Tải lên</b>. Cả bộ file được lưu một lần.</p>
+          <button class="btn primary block" id="odall">☁ Lưu tất cả vào OneDrive</button>
+          <p class="muted small">Muốn app tự lưu thẳng vào Output không cần chọn thư mục: IT cấp Client ID Microsoft 365 rồi nhập ở ⚙ Cài đặt.</p>`}
       </div>
       ${Util.inAppBrowser ? '<div class="card warn-card small"><b>App đang mở trong Zalo/Facebook/Teams.</b> Các ứng dụng này chặn tải và chia sẻ file. Bấm ⋮ hoặc ⋯ → <b>Mở bằng trình duyệt</b> (Chrome/Safari), hoặc mở app từ biểu tượng trên màn hình chính.</div>' : ''}
       ${[['trip', 'Báo cáo kiểm kê', n.trip], ['signed', 'Biên bản kiểm kê (đã ký trên app)', n.signed], ['unsigned', 'Biên bản để in ký tay', n.unsigned], ['excel', 'File Excel kết quả', n.excel]].map(([k, t, fn]) => `
@@ -818,6 +855,26 @@
     $$('[data-dl]').forEach(b => b.onclick = () => doDownload(files[b.dataset.dl]));
     $$('[data-share]').forEach(b => b.onclick = () => doShare(files[b.dataset.share]));
     $$('[data-ext]').forEach(b => b.onclick = () => act(() => Util.openExternal(files[b.dataset.ext].blob)));
+    const all = ['trip', 'signed', 'unsigned', 'excel'].map(k => files[k]);
+    $('#odall').onclick = () => {
+      if (ms) {
+        guard(async () => {
+          for (const f of all) await DB.put('outbox', { id: Util.uid(), name: f.name, folder: Config.get().oneDrive.outputFolder, blob: f.blob, createdAt: Date.now() });
+          const r = await OneDrive.flushOutbox();
+          toast(r.pending ? `Đã gửi ${r.sent}, còn ${r.pending} file sẽ gửi khi có mạng` : `Đã lưu ${r.sent} file vào OneDrive Output`);
+          refreshNet();
+        }, 'Đang lưu lên OneDrive...');
+        return;
+      }
+      // Gọi chia sẻ ngay trong lần bấm (file đã tạo sẵn)
+      act(() => Util.shareMany(all).then(r => {
+        if (r === false) {
+          toast('Máy này không chia sẻ được nhiều file một lúc: dùng nút Chia sẻ ở từng file → OneDrive', 'err');
+        } else if (r === 'pdf-only') {
+          toast('Đã gửi các file PDF. File Excel: bấm Tải về rồi tải lên OneDrive.');
+        }
+      }));
+    };
     $$('[data-up]').forEach(b => b.onclick = () => guard(async () => {
       const f = files[b.dataset.up];
       const r = await OneDrive.queueUpload(f.name, f.blob);
@@ -845,6 +902,13 @@
         <label>Tên công ty<input id="cn" value="${E(c.companyName)}"></label>
         <label>Tên miền email được phép (cách nhau dấu phẩy)<input id="dom" value="${E((c.allowedDomains || []).join(', '))}"></label>
         <label>Tên hệ thống sổ sách (cột (1) trên biên bản)<input id="sysn" value="${E(c.systemName || '')}"></label>
+        <h4>Logo đầu trang báo cáo</h4>
+        <div id="logoBox">${Branding.logo() ? `<img src="${Branding.logo()}" class="logo-preview" alt="logo">` : '<p class="muted small">Chưa có logo</p>'}</div>
+        <p class="muted small">Chọn file logo (ví dụ "Refined green CP pig emblem.png" trong OneDrive › Apps Kiem Kho › Input). Logo in ở đầu mỗi trang báo cáo và biên bản.</p>
+        <div class="row gap">
+          <label class="btn small-btn">🖼 Chọn logo<input type="file" accept="image/*" id="logoIn" hidden></label>
+          ${Branding.logo() ? '<button class="btn small-btn" id="logoRm">Bỏ logo</button>' : ''}
+        </div>
       </div>
       <div class="card">
         <h3>Microsoft 365 / OneDrive</h3>
@@ -880,6 +944,12 @@
       ${user ? '<button class="btn block" id="logout">Đăng xuất</button>' : ''}
       <p class="muted small center">Phiên bản ${window.APP_VERSION}</p>`;
 
+    $('#logoIn').onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      guard(async () => { Branding.setLogo(await Util.readLogo(file)); toast('Đã lưu logo'); renderSettings(); }, 'Đang lưu logo...');
+    };
+    if ($('#logoRm')) $('#logoRm').onclick = () => { Branding.setLogo(null); renderSettings(); };
     $('#addf').onclick = () => $('#facs').insertAdjacentHTML('beforeend', facRow({ code: '', name: '', address: '', inputFile: '' }));
     $('#facs').onchange = e => {
       if (!e.target.matches('.fcov') || !e.target.files[0]) return;

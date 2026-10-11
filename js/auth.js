@@ -35,6 +35,16 @@ const Covers = {
   }
 };
 
+// Logo đầu trang báo cáo (lưu trên máy, chọn trong Cài đặt)
+const Branding = {
+  logo: () => { try { return localStorage.getItem('kk_logo'); } catch (e) { return null; } },
+  setLogo: data => {
+    try {
+      if (data) localStorage.setItem('kk_logo', data); else localStorage.removeItem('kk_logo');
+    } catch (e) { throw new Error('Logo quá lớn, không lưu được trên máy'); }
+  }
+};
+
 const Auth = (function () {
   const USER_KEY = 'kk_user';
   let msalApp = null;

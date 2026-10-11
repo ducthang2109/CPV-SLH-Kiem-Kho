@@ -1,5 +1,5 @@
 :root {
-  --brand: #0b3d91; --bg: #f2f4f8; --card: #fff; --text: #1d2433; --muted: #6b7280; --line: #dde3ec;
+  --brand: #0a7a3c; --bg: #f2f4f8; --card: #fff; --text: #1d2433; --muted: #6b7280; --line: #dde3ec;
   --ok: #2e7d32; --warn: #e65100; --bad: #c62828;
 }
 * { box-sizing: border-box; }
@@ -86,6 +86,11 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 4px 0; }
 .check input { width: 20px; height: 20px; flex: 0 0 auto !important; margin: 0; }
 .updbar { position: fixed; left: 8px; right: 8px; bottom: 80px; z-index: 70; background: #263238; color: #fff; padding: 10px 12px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
 .updbar .btn { margin: 0; }
+.search-row { flex-wrap: nowrap !important; }
+.search-row #q { flex: 1; }
+#reader { width: 100%; min-height: 220px; background: #000; border-radius: 8px; overflow: hidden; }
+.logo-preview { max-width: 260px; max-height: 70px; object-fit: contain; display: block; margin: 4px 0; background: #fff; }
+.od-card { border-color: #9ccfb0; background: #f0f8f3; }
 .warnc-text { color: var(--warn); font-weight: 600; }
 .steps { padding-left: 18px; margin: 6px 0; } .steps li { margin: 4px 0; }
 .presence { display: flex; gap: 10px; align-items: center; margin: 4px 0 8px; }
