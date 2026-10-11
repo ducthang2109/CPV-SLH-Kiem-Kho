@@ -25,11 +25,15 @@ const OneDrive = (function () {
   }
 
   // Tìm file input của nhà máy: file mới nhất khớp mẫu tên
+  // inputFile có thể kèm thư mục con, ví dụ "Data/B43210_*.xlsx" -> tìm trong Input/Data
   async function findInputFile(factory) {
-    const files = await listFolder(Config.get().oneDrive.inputFolder);
-    const re = wildcard(factory.inputFile || '*.xlsx');
+    const pattern = factory.inputFile || '*.xlsx';
+    const cut = pattern.lastIndexOf('/');
+    const folder = Config.get().oneDrive.inputFolder + (cut >= 0 ? '/' + pattern.slice(0, cut) : '');
+    const files = await listFolder(folder);
+    const re = wildcard(cut >= 0 ? pattern.slice(cut + 1) : pattern);
     const hits = files.filter(f => re.test(f.name)).sort((a, b) => b.lastModifiedDateTime.localeCompare(a.lastModifiedDateTime));
-    return { match: hits[0] || null, all: files.filter(f => /\.xlsx?$/i.test(f.name)) };
+    return { folder, match: hits[0] || null, all: files.filter(f => /\.xlsx?$/i.test(f.name)) };
   }
 
   async function download(folder, name) {

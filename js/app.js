@@ -158,11 +158,11 @@
       if (file) load(await file.arrayBuffer(), file.name, file.lastModified ? new Date(file.lastModified).toISOString() : null);
     };
     if ($('#od')) $('#od').onclick = () => guard(async () => {
-      const { match, all } = await OneDrive.findInputFile(f);
+      const { folder, match, all } = await OneDrive.findInputFile(f);
       $('#odList').innerHTML = all.map(x => `<button class="btn block ${match && x.name === match.name ? 'primary' : ''}" data-f="${E(x.name)}">${E(x.name)} <span class="small">· ${Util.vnDateTime(x.lastModifiedDateTime)}</span></button>`).join('') || '<p class="muted">Không thấy file Excel trong thư mục.</p>';
       $$('#odList [data-f]').forEach(b => b.onclick = () => guard(async () => {
         const meta = all.find(x => x.name === b.dataset.f);
-        load(await OneDrive.download(Config.get().oneDrive.inputFolder, b.dataset.f), b.dataset.f, meta && meta.lastModifiedDateTime);
+        load(await OneDrive.download(folder, b.dataset.f), b.dataset.f, meta && meta.lastModifiedDateTime);
       }, 'Đang tải từ OneDrive...'));
       if (match) toast('Tìm thấy ' + match.name);
     }, 'Đang tìm file trên OneDrive...');
