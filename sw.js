@@ -1,5 +1,6 @@
 // Service worker: lưu toàn bộ app trên máy để chạy không cần mạng.
-const CACHE = 'kiem-kho-v1.3.0';
+// Có mạng thì lấy bản mới nhất từ máy chủ (để điện thoại không bị kẹt ở bản cũ), mất mạng thì dùng bản đã lưu.
+const CACHE = 'kiem-kho-v1.4.0';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png',
@@ -17,13 +18,27 @@ self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 
+// Thư viện lớn ít thay đổi: lấy từ bộ nhớ trước cho nhanh
+const isVendor = url => url.pathname.includes('/vendor/');
+
+function fromNetwork(req) {
+  // Sóng yếu trong kho: chờ tối đa 4 giây rồi dùng bản đã lưu
+  return Promise.race([
+    fetch(req, { cache: 'no-cache' }).then(res => {
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+      return res;
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+  ]);
+}
+
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return; // Graph / đăng nhập đi thẳng ra mạng
-  e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request).then(res => {
-      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
-      return res;
-    }))
-  );
+  const cached = () => caches.match(e.request, { ignoreSearch: true });
+  if (isVendor(url)) {
+    e.respondWith(cached().then(hit => hit || fromNetwork(e.request)));
+    return;
+  }
+  e.respondWith(fromNetwork(e.request).catch(() => cached().then(hit => hit || caches.match('index.html'))));
 });

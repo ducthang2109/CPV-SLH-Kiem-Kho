@@ -65,14 +65,34 @@ const Util = (function () {
     try { return !!(navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: blob.type })] })); } catch (e) { return false; }
   }
 
-  // Phải gọi ngay trong lần bấm nút (không chờ tạo file trước), nếu không điện thoại sẽ chặn
-  function download(blob, name) {
-    // iPhone khi mở app từ màn hình chính không tải file trực tiếp được: dùng bảng Chia sẻ > Lưu vào Tệp
-    if (isIOS && canShareFile(blob, name)) return share(blob, name);
+  // App mở bên trong Zalo / Facebook / Teams... (trình duyệt nhúng) thường chặn tải file và chia sẻ
+  const inAppBrowser = /FBAN|FBAV|Instagram|Line\/|Zalo|MicroMessenger|Teams|; wv\)/i.test(navigator.userAgent);
+
+  // Các hàm dưới phải được gọi ngay trong lần bấm nút (file đã tạo sẵn), nếu chờ lâu điện thoại sẽ chặn.
+  function anchorDownload(blob, name) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name; a.rel = 'noopener';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    a.style.display = 'none';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(a.href); }, 60000);
+  }
+
+  // Mở file bằng trình xem của máy (tab mới). Dùng khi không tải được trực tiếp.
+  function openExternal(blob) {
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, '_blank');
+    if (!w) location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  }
+
+  function download(blob, name) {
+    // iPhone/iPad không tải file trực tiếp được: mở bảng Chia sẻ để chọn "Lưu vào Tệp"
+    if (isIOS) {
+      if (canShareFile(blob, name)) return share(blob, name);
+      openExternal(blob);
+      return Promise.resolve(true);
+    }
+    anchorDownload(blob, name);
     return Promise.resolve(true);
   }
 
@@ -80,17 +100,19 @@ const Util = (function () {
     if (canShareFile(blob, name)) {
       return navigator.share({ files: [new File([blob], name, { type: blob.type })], title: name })
         .then(() => true)
-        .catch(e => { if (e.name !== 'AbortError') throw new Error('Không chia sẻ được: ' + e.message); return false; });
+        .catch(e => {
+          if (e.name === 'AbortError') return false; // người dùng tự đóng bảng chia sẻ
+          // Bị chặn (mất lượt bấm, trình duyệt nhúng...): tải về thay thế để không mất file
+          if (isIOS) openExternal(blob); else anchorDownload(blob, name);
+          throw new Error('Máy không cho chia sẻ trực tiếp (' + e.name + '), đã chuyển sang tải file về.');
+        });
     }
-    // Loại file này điện thoại không cho chia sẻ trực tiếp (ví dụ Excel trên Android): tải về rồi gửi từ thư mục Tải xuống
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    // Loại file máy không cho chia sẻ trực tiếp (ví dụ Excel trên Android): tải về rồi gửi từ thư mục Tải xuống
+    if (isIOS) openExternal(blob); else anchorDownload(blob, name);
     return Promise.resolve(false);
   }
 
   const safeName = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w.-]+/g, '_');
 
-  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, compressImage, sha256, download, share, safeName, isIOS };
+  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, compressImage, sha256, download, share, openExternal, safeName, isIOS, inAppBrowser, canShareFile };
 })();

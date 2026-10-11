@@ -61,5 +61,24 @@ const Viewer = (function () {
     }
   }
 
-  return { open };
+  // Chuyển từng trang PDF thành ảnh (để đưa biên bản đã ký vào báo cáo kiểm kê)
+  async function toImages(blob, widthPx = 1240) {
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+    const out = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: widthPx / base.width });
+      const c = document.createElement('canvas');
+      c.width = vp.width; c.height = vp.height;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      // intent 'print': không phụ thuộc requestAnimationFrame, nên vẫn chạy khi màn hình tắt / app chạy nền
+      await page.render({ canvasContext: ctx, viewport: vp, intent: 'print' }).promise;
+      out.push(c.toDataURL('image/jpeg', 0.82));
+    }
+    return out;
+  }
+
+  return { open, toImages };
 })();

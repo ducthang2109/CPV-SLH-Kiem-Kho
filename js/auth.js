@@ -25,6 +25,16 @@ const Config = (function () {
   return { get, save };
 })();
 
+// Ảnh bìa mặc định của từng nhà máy (lưu riêng trên máy vì ảnh lớn)
+const Covers = {
+  get: code => { try { return localStorage.getItem('kk_cover_' + code); } catch (e) { return null; } },
+  set: (code, data) => {
+    try {
+      if (data) localStorage.setItem('kk_cover_' + code, data); else localStorage.removeItem('kk_cover_' + code);
+    } catch (e) { throw new Error('Ảnh quá lớn, không lưu được trên máy'); }
+  }
+};
+
 const Auth = (function () {
   const USER_KEY = 'kk_user';
   let msalApp = null;

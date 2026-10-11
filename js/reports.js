@@ -94,7 +94,8 @@ const Reports = (function () {
   }
 
   // ---------- Biên bản kiểm kê (theo mẫu 22.09 đã ký) ----------
-  function inventoryDoc(s, withSignatures) {
+  // opts.appendix = false: bỏ phụ lục ảnh (khi chèn biên bản vào báo cáo kiểm kê, ảnh đã có ở phần riêng)
+  function inventoryDoc(s, withSignatures, opts = {}) {
     const { items } = summary(s);
     const cfg = Config.get();
     const H = (t, o = {}) => Object.assign({ text: t, style: 'th' }, o);
@@ -160,7 +161,7 @@ const Reports = (function () {
       signatureBlock(s, withSignatures)
     ];
 
-    if (withSignatures) {
+    if (withSignatures && opts.appendix !== false) {
       const pics = [...presenceBlock(s), ...photoAppendix(items)];
       if (pics.length) content.push({ text: 'PHỤ LỤC: HÌNH ẢNH ĐÍNH KÈM', style: 'h2', pageBreak: 'before' }, ...pics);
     }
@@ -216,84 +217,146 @@ const Reports = (function () {
     return out;
   }
 
-  // ---------- Báo cáo đi kiểm kê kho ----------
-  function tripDoc(s) {
+  // ---------- Báo cáo kiểm kê: trang bìa / nội dung / Thank You ----------
+  // opts.minutesImages: ảnh các trang biên bản đã ký; opts.cover: ảnh bìa nhà máy
+  function tripDoc(s, opts = {}) {
     const { items, sum } = summary(s);
     const tr = s.trip || {};
     const user = s.user || {};
-    const p = t => ({ text: t, margin: [0, 2, 0, 2] });
-    const tableStyle = { hLineWidth: () => 0.5, vLineWidth: () => 0.5, hLineColor: () => '#9e9e9e', vLineColor: () => '#9e9e9e' };
+    const BRAND = '#0b3d91', ACCENT = '#f5b400';
+    const W = 595.28, Hh = 841.89;
+    const p = (t, o = {}) => Object.assign({ text: t, margin: [0, 2, 0, 2] }, o);
+    const cover = opts.cover || s.coverPhoto || (s.checkIn && s.checkIn.data) || null;
+    const st = startTime(s), en = endTime(s);
+    const inspectors = s.committee.filter(m => m.name).map(m => `${m.name}${m.role ? ' – ' + m.role : ''}`);
 
-    const whRows = [[{ text: 'Kho', style: 'th' }, { text: 'Số dòng', style: 'th' }, { text: 'Đã KK', style: 'th' }, { text: 'SL sổ sách', style: 'th' }, { text: 'SL thực tế', style: 'th' }, { text: 'KL sổ sách', style: 'th' }, { text: 'KL thực tế', style: 'th' }, { text: 'CL KL', style: 'th' }]];
-    for (const [wh, list] of byWarehouse(items)) {
-      const c = list.filter(i => i.actualQty != null);
-      const a = list.reduce((x, i) => x + i.sysQty, 0), b = c.reduce((x, i) => x + i.actualQty, 0);
-      const w1 = list.reduce((x, i) => x + i.sysWgh, 0), w2 = c.reduce((x, i) => x + i.aWgh, 0);
-      const dw = c.reduce((x, i) => x + i.var.wgh, 0); // chỉ tính trên các dòng đã kiểm
-      whRows.push([wh, { text: list.length, alignment: 'right' }, { text: c.length, alignment: 'right' }, { text: F(a), alignment: 'right' }, { text: F(b), alignment: 'right' }, { text: F(w1), alignment: 'right' }, { text: F(w2), alignment: 'right' }, { text: signed(Util.round(dw)), alignment: 'right' }]);
-    }
-
-    const diff = items.filter(i => i.var && (i.var.qty !== 0 || Math.abs(i.var.wgh) > 0.0005));
-    const diffRows = [[ 'Mã', 'Tên hàng', 'Lô', 'Kho', 'CL SL', 'CL KL', 'Ghi chú' ].map(t => ({ text: t, style: 'th' }))]
-      .concat(diff.map(i => [i.code, i.name, i.lot, i.warehouseCode, { text: signed(i.var.qty), alignment: 'right' }, { text: signed(i.var.wgh), alignment: 'right' }, i.note || '']));
-
-    const expItems = items.filter(i => i.exp.status === 'expired' || i.exp.status === 'near');
-    const expRows = [[ 'Mã', 'Tên hàng', 'Lô', 'Kho', 'NSX', 'HSD', 'SL', 'Tình trạng' ].map(t => ({ text: t, style: 'th' }))]
-      .concat(expItems.map(i => [i.code, i.name, i.lot, i.warehouseCode, Util.vnDate(i.prodDate), Util.vnDate(i.exp.expDate), { text: F(i.actualQty != null ? i.actualQty : i.sysQty), alignment: 'right' }, { text: i.exp.label, color: STATUS_COLOR[i.exp.status] }]));
-
-    const uncounted = items.filter(i => i.actualQty == null);
-
-    const content = [
-      headerBlock(s, [{ text: 'Số: BC-' + docNo(s), bold: true }]),
-      { text: 'BÁO CÁO ĐI KIỂM KÊ KHO', style: 'title' },
-      { text: dateWords(s.countDate), alignment: 'center', italics: true, margin: [0, 0, 0, 10] },
-      { text: 'I. THÔNG TIN CHUNG', style: 'h2' },
-      p(`Nhà máy / địa điểm: ${s.factory.name}${s.factory.address ? ' – ' + s.factory.address : ''}`),
-      p(`Thời gian: bắt đầu ${Stamp.dt(new Date(startTime(s)))}${endTime(s) ? ', kết thúc ' + Stamp.dt(new Date(endTime(s))) : ''}`),
-      s.checkIn ? p(`Vị trí lúc bắt đầu: ${Geo.fmt(s.checkIn.geo)}${distanceText(s, s.checkIn) ? ' – ' + distanceText(s, s.checkIn) : ''}`) : '',
-      s.checkOut ? p(`Vị trí lúc kết thúc: ${Geo.fmt(s.checkOut.geo)}${distanceText(s, s.checkOut) ? ' – ' + distanceText(s, s.checkOut) : ''}`) : '',
-      ...presenceBlock(s),
-      p(`Người lập báo cáo: ${user.name || ''} (${user.email || ''})`),
-      p('Thành phần tham gia: ' + s.committee.filter(m => m.name).map(m => `${m.name} (${m.title || m.role})`).join('; ')),
-      p('Mục đích: ' + (tr.purpose || 'Kiểm kê định kỳ, đối chiếu số lượng tồn kho thực tế với số liệu sổ sách, kiểm tra hạn sử dụng hàng tồn.')),
-      p(`Dữ liệu đối chiếu: ${s.sourceFile || ''} (${sum.lines} dòng hàng).`),
-      { text: 'II. KẾT QUẢ KIỂM KÊ THEO KHO', style: 'h2' },
-      { table: { headerRows: 1, widths: ['*', 34, 30, 50, 50, 55, 55, 45], body: whRows }, layout: tableStyle, fontSize: 8 },
-      p(`Đã kiểm ${sum.counted}/${sum.lines} dòng. Tổng KL sổ sách ${F(sum.sysWgh)} kg, thực tế ${F(sum.actWgh)} kg. Có ${sum.overLines} dòng thừa, ${sum.shortLines} dòng thiếu.`),
-      { text: 'III. HÀNG CHÊNH LỆCH', style: 'h2' },
-      diff.length ? { table: { headerRows: 1, widths: [40, '*', 70, 28, 34, 40, 90], body: diffRows }, layout: tableStyle, fontSize: 8 } : p('Không có chênh lệch.'),
-      { text: 'IV. HẠN SỬ DỤNG', style: 'h2' },
-      p(`${sum.expired} dòng đã hết hạn, ${sum.near} dòng sắp hết hạn (tính đến ngày kiểm kê ${Util.vnDate(s.countDate)}).`),
-      expItems.length ? { table: { headerRows: 1, widths: [40, '*', 70, 28, 46, 46, 30, 80], body: expRows }, layout: tableStyle, fontSize: 8 } : '',
-      uncounted.length ? { text: 'V. HÀNG CHƯA KIỂM: ' + uncounted.map(i => `${i.code}/${i.lot}`).join(', '), style: 'h2' } : '',
-      { text: (uncounted.length ? 'VI' : 'V') + '. NHẬN XÉT, KẾT LUẬN', style: 'h2' },
-      p(tr.conclusion || '...........................................................................................................'),
-      { text: (uncounted.length ? 'VII' : 'VI') + '. KIẾN NGHỊ', style: 'h2' },
-      p(tr.recommendation || '...........................................................................................................'),
+    // ===== Trang 1: bìa =====
+    const infoRow = (k, v) => [{ text: k, color: '#5f6b7a', fontSize: 10 }, { text: v || '', bold: true, fontSize: 11 }];
+    const coverPage = [
+      { canvas: [{ type: 'rect', x: 0, y: 0, w: W, h: 150, color: BRAND }, { type: 'rect', x: 0, y: 150, w: W, h: 6, color: ACCENT }], absolutePosition: { x: 0, y: 0 } },
+      { text: s.companyName.toUpperCase(), color: '#ffffff', fontSize: 11, bold: true, absolutePosition: { x: 40, y: 34 } },
+      { text: s.factory.name, color: '#dbe6ff', fontSize: 10, absolutePosition: { x: 40, y: 52 } },
+      { text: 'BÁO CÁO KIỂM KÊ', color: '#ffffff', fontSize: 30, bold: true, absolutePosition: { x: 40, y: 80 } },
+      { text: 'Hàng tồn kho · ' + Util.vnDate(s.countDate), color: '#ffd76a', fontSize: 12, absolutePosition: { x: 42, y: 118 } },
+      cover
+        ? { image: cover, fit: [W - 80, 340], alignment: 'center', margin: [0, 140, 0, 18] }
+        : { canvas: [{ type: 'rect', x: 0, y: 0, w: W - 80, h: 260, color: '#e8eef8' }], margin: [0, 140, 0, 18] },
       {
-        columns: [{ width: '*', text: '' }, { width: 200, alignment: 'center', stack: [
-          { text: dateWords(s.countDate), italics: true, fontSize: 9 },
-          { text: 'NGƯỜI LẬP BÁO CÁO', bold: true },
-          s.reporterSignature ? { image: s.reporterSignature, fit: [120, 50], margin: [0, 4, 0, 2] } : { text: ' ', margin: [0, 25, 0, 25] },
-          { text: user.name || '', bold: true }
-        ] }], margin: [0, 14, 0, 0], unbreakable: true
-      }
+        table: {
+          widths: [110, '*'],
+          body: [
+            infoRow('Ngày kiểm kê', dateWords(s.countDate).replace(/^ngày/, 'Ngày')),
+            infoRow('Nhà máy', s.factory.name),
+            s.factory.address ? infoRow('Địa chỉ', s.factory.address) : infoRow('', ''),
+            infoRow('Kho kiểm kê', storeTitle(s)),
+            infoRow('Người kiểm tra', `${user.name || ''}${user.email ? ' (' + user.email + ')' : ''}`),
+            infoRow('Thời gian', `${hm(st)}${en ? ' – ' + hm(en) : ''}`),
+            infoRow('Số biên bản', docNo(s))
+          ]
+        },
+        layout: { hLineWidth: (i, node) => (i === 0 || i === node.table.body.length) ? 0 : 0.5, vLineWidth: () => 0, hLineColor: () => '#d5dce6', paddingTop: () => 5, paddingBottom: () => 5 },
+        margin: [0, 0, 0, 0]
+      },
+      { text: '', pageBreak: 'after' }
     ];
 
-    const pics = photoAppendix(items);
-    (s.generalPhotos || []).forEach(g => pics.push({ text: g.caption || 'Hình ảnh hiện trường', bold: true, fontSize: 8, margin: [0, 6, 0, 2] }, { image: g.data, fit: [360, 240] }));
-    if (pics.length) content.push({ text: 'PHỤ LỤC HÌNH ẢNH', style: 'h2', pageBreak: 'before' }, ...pics);
+    // ===== Trang nội dung =====
+    const issueOf = it => {
+      const v = it.var;
+      const tags = [];
+      if (it.actualQty == null) tags.push({ t: 'Chưa kiểm', c: '#757575' });
+      if (v && v.qty < 0) tags.push({ t: 'Thiếu', c: '#c62828' });
+      if (v && v.qty > 0) tags.push({ t: 'Thừa', c: '#1565c0' });
+      if (v && v.qty === 0 && Math.abs(v.wgh) > 0.0005) tags.push({ t: 'Lệch trọng lượng', c: '#c62828' });
+      if (it.exp.status === 'expired') tags.push({ t: 'Hết hạn', c: '#c62828' });
+      if (it.exp.status === 'near') tags.push({ t: 'Sắp hết hạn', c: '#e65100' });
+      if (it.isExtra) tags.push({ t: 'Ngoài sổ sách', c: '#6a1b9a' });
+      return tags;
+    };
+    const issues = items.filter(it => issueOf(it).some(t => t.t !== 'Chưa kiểm'));
+    const uncounted = items.filter(i => i.actualQty == null);
+
+    const section = t => ({ text: t, fontSize: 14, bold: true, color: BRAND, margin: [0, 6, 0, 6] });
+    const photoGrid = (list) => {
+      const out = [];
+      for (let i = 0; i < list.length; i += 2) {
+        out.push({
+          columns: list.slice(i, i + 2).map(x => ({ width: '*', stack: [{ image: x.data, fit: [250, 230] }, { text: x.caption || '', fontSize: 8, color: '#444', margin: [0, 2, 0, 0] }] })).concat(list.length - i === 1 ? [{ width: '*', text: '' }] : []),
+          columnGap: 14, margin: [0, 0, 0, 10], unbreakable: true
+        });
+      }
+      return out;
+    };
+
+    const content = [...coverPage];
+
+    // 1. Biên bản có chữ ký
+    content.push(section('1. BIÊN BẢN KIỂM KÊ (CÓ CHỮ KÝ)'));
+    content.push(p(`Đã kiểm ${sum.counted}/${sum.lines} dòng hàng tại ${byWarehouse(items).size} kho. Trọng lượng sổ sách ${F(sum.sysWgh)} kg, thực tế ${F(sum.actWgh)} kg. ${sum.overLines} dòng thừa, ${sum.shortLines} dòng thiếu, ${sum.expired} dòng hết hạn, ${sum.near} dòng sắp hết hạn.`, { fontSize: 10 }));
+    if (opts.minutesImages && opts.minutesImages.length) {
+      opts.minutesImages.forEach((img, i) => content.push({ image: img, fit: [W - 72, Hh - 150], alignment: 'center', margin: [0, 6, 0, 0], pageBreak: i > 0 ? 'before' : undefined }));
+    } else {
+      content.push(p('Xem file biên bản kiểm kê đã ký kèm theo: ' + fileNames(s).signed, { italics: true }));
+    }
+
+    // 2. Hình ảnh một số sản phẩm kiểm kho
+    const productPhotos = [];
+    if (s.checkIn) productPhotos.push({ data: s.checkIn.data, caption: `Bắt đầu kiểm kê – ${Stamp.dt(new Date(s.checkIn.time))} – ${Geo.fmt(s.checkIn.geo)}` });
+    if (s.checkOut) productPhotos.push({ data: s.checkOut.data, caption: `Kết thúc kiểm kê – ${Stamp.dt(new Date(s.checkOut.time))} – ${Geo.fmt(s.checkOut.geo)}` });
+    const issueIds = new Set(issues.map(i => i.id));
+    items.filter(it => !issueIds.has(it.id) && (it.photos || []).length).forEach(it =>
+      it.photos.forEach(ph => productPhotos.push({ data: ph, caption: `${it.code} – ${it.name} – Lô ${it.lot}` })));
+    (s.generalPhotos || []).forEach(g => productPhotos.push({ data: g.data, caption: g.caption || 'Hình ảnh hiện trường' }));
+    content.push(Object.assign(section('2. HÌNH ẢNH KIỂM KHO'), { pageBreak: 'before' }));
+    if (productPhotos.length) content.push(...photoGrid(productPhotos));
+    else content.push(p('Không có ảnh.', { italics: true }));
+
+    // 3. Vấn đề phát sinh
+    content.push(Object.assign(section('3. VẤN ĐỀ PHÁT SINH'), { pageBreak: 'before' }));
+    if (!issues.length && !uncounted.length) content.push(p('Không có vấn đề phát sinh: số lượng khớp sổ sách, không có hàng hết hạn.'));
+    issues.forEach((it, n) => {
+      const v = it.var;
+      const tags = issueOf(it);
+      const block = [
+        { text: [{ text: `${n + 1}. ${it.code} – ${it.name}  `, bold: true }, ...tags.map(t => ({ text: ` ${t.t} `, color: '#fff', background: t.c, bold: true, fontSize: 8 })).flatMap(x => [x, ' '])], fontSize: 10 },
+        { text: `Lô ${it.lot} · ${it.warehouse} · NSX ${Util.vnDate(it.prodDate)} · HSD ${Util.vnDate(it.exp.expDate)} (${it.exp.label})`, fontSize: 8, color: '#555', margin: [0, 1, 0, 2] },
+        v ? { text: `Sổ sách ${F(it.sysQty)} / ${F(it.sysWgh)} kg   |   Thực tế ${F(it.actualQty)} / ${F(it.aWgh)} kg   |   Chênh lệch ${signed(v.qty)} / ${signed(v.wgh)} kg`, fontSize: 9 } : '',
+        it.note ? { text: [{ text: 'Ghi chú: ', bold: true }, it.note], fontSize: 9, margin: [0, 2, 0, 0] } : ''
+      ];
+      content.push({ stack: block, margin: [0, 6, 0, 4], unbreakable: true });
+      if ((it.photos || []).length) content.push(...photoGrid(it.photos.map(ph => ({ data: ph, caption: `${it.code} – Lô ${it.lot}` }))));
+      content.push({ canvas: [{ type: 'line', x1: 0, y1: 0, x2: W - 72, y2: 0, lineWidth: 0.5, lineColor: '#d5dce6' }], margin: [0, 2, 0, 2] });
+    });
+    if (uncounted.length) content.push(p(`Chưa kiểm ${uncounted.length} dòng: ` + uncounted.map(i => `${i.code}/${i.lot}`).join(', '), { fontSize: 9, color: '#555' }));
+
+    content.push({ text: 'Kết luận', bold: true, fontSize: 11, color: BRAND, margin: [0, 10, 0, 2] });
+    content.push(p(tr.conclusion || '........................................................................................................'));
+    content.push({ text: 'Kiến nghị', bold: true, fontSize: 11, color: BRAND, margin: [0, 8, 0, 2] });
+    content.push(p(tr.recommendation || '........................................................................................................'));
+    content.push({
+      columns: [{ width: '*', text: '' }, { width: 200, alignment: 'center', stack: [
+        { text: dateWords(s.countDate), italics: true, fontSize: 9 },
+        { text: 'NGƯỜI KIỂM TRA', bold: true },
+        s.reporterSignature ? { image: s.reporterSignature, fit: [120, 50], margin: [0, 4, 0, 2] } : { text: ' ', margin: [0, 25, 0, 25] },
+        { text: user.name || '', bold: true }
+      ] }], margin: [0, 12, 0, 0], unbreakable: true
+    });
+
+    // ===== Trang cuối: Thank You =====
+    content.push(
+      { text: '', pageBreak: 'before' },
+      { canvas: [{ type: 'rect', x: 0, y: 0, w: W, h: Hh, color: BRAND }, { type: 'rect', x: 0, y: Hh / 2 + 70, w: W, h: 6, color: ACCENT }], absolutePosition: { x: 0, y: 0 } },
+      { text: 'THANK YOU', color: '#ffffff', fontSize: 54, bold: true, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 - 70 } },
+      { text: 'Xin cảm ơn!', color: '#ffd76a', fontSize: 18, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 5 } },
+      { text: s.companyName, color: '#ffffff', fontSize: 11, bold: true, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 100 } },
+      { text: `${s.factory.name} · ${Util.vnDate(s.countDate)}`, color: '#dbe6ff', fontSize: 10, alignment: 'center', absolutePosition: { x: 0, y: Hh / 2 + 118 } }
+    );
 
     return {
-      pageSize: 'A4', pageMargins: [36, 30, 36, 34],
+      pageSize: 'A4', pageMargins: [36, 36, 36, 36],
       defaultStyle: { font: 'Roboto', fontSize: 10 },
-      styles: {
-        title: { fontSize: 15, bold: true, alignment: 'center', margin: [0, 6, 0, 2] },
-        h2: { fontSize: 11, bold: true, margin: [0, 10, 0, 4], color: '#0b3d91' },
-        th: { bold: true, alignment: 'center', fillColor: '#c9d6ea' }
-      },
-      footer: (pg, n) => ({ text: `BC-${docNo(s)}   ·   Trang ${pg}/${n}`, alignment: 'right', fontSize: 7, color: '#777', margin: [0, 10, 36, 0] }),
-      info: { title: 'Báo cáo đi kiểm kê kho ' + docNo(s) },
+      footer: (pg, n) => (pg === 1 || pg === n) ? null : ({ text: `Báo cáo kiểm kê ${docNo(s)}   ·   ${pg}/${n}`, alignment: 'right', fontSize: 7, color: '#777', margin: [0, 10, 36, 0] }),
+      info: { title: 'Báo cáo kiểm kê ' + docNo(s) },
       content
     };
   }
@@ -325,7 +388,7 @@ const Reports = (function () {
     return {
       signed: `${base}_BienBan_DaKy.pdf`,
       unsigned: `${base}_BienBan_KyTay.pdf`,
-      trip: `${base}_BaoCaoDiKiemKe.pdf`,
+      trip: `${base}_BaoCaoKiemKe.pdf`,
       excel: `${base}_KetQua.xlsx`
     };
   }

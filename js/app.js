@@ -185,9 +185,39 @@
     $('#preview').scrollIntoView({ behavior: 'smooth' });
   }
 
+  // Chọn kho cần kiểm (không bắt buộc kiểm hết)
+  function pickWarehouses(ds) {
+    const counts = new Map();
+    ds.items.forEach(i => counts.set(i.warehouse, (counts.get(i.warehouse) || 0) + 1));
+    return new Promise(resolve => {
+      const d = document.createElement('div');
+      d.className = 'modal';
+      d.innerHTML = `<div class="card">
+        <h3>Chọn kho để kiểm</h3>
+        <p class="muted small">Chỉ những kho được chọn mới có trong danh sách kiểm và trên biên bản.</p>
+        <label class="row gap check"><input type="checkbox" id="whall" checked> <b>Tất cả kho</b></label>
+        ${[...counts].map(([w, n], i) => `<label class="row gap check"><input type="checkbox" class="whc" value="${i}" checked> ${E(w)} <span class="muted small">(${n} dòng)</span></label>`).join('')}
+        <div class="row gap"><button class="btn" id="whcancel">Hủy</button><button class="btn primary" id="whok">Bắt đầu</button></div>
+      </div>`;
+      document.body.appendChild(d);
+      const list = [...counts.keys()];
+      const boxes = $$('.whc', d);
+      $('#whall', d).onchange = e => boxes.forEach(b => { b.checked = e.target.checked; });
+      boxes.forEach(b => b.onchange = () => { $('#whall', d).checked = boxes.every(x => x.checked); });
+      $('#whcancel', d).onclick = () => { d.remove(); resolve(null); };
+      $('#whok', d).onclick = () => {
+        const chosen = boxes.filter(b => b.checked).map(b => list[Number(b.value)]);
+        if (!chosen.length) return toast('Chọn ít nhất một kho', 'err');
+        d.remove(); resolve(chosen);
+      };
+    });
+  }
+
   async function startSession(code) {
     const ds = await DB.get('datasets', code);
     const f = factoryOf(code);
+    const chosen = await pickWarehouses(ds);
+    if (!chosen) return;
     const user = Auth.currentUser();
     const cfg = Config.get();
     const committee = cfg.committeeRoles.map(r => Object.assign({}, r, { signature: null }));
@@ -204,7 +234,9 @@
       finishedAt: null,
       sourceFile: ds.fileName,
       status: 'counting',
-      items: JSON.parse(JSON.stringify(ds.items)),
+      items: JSON.parse(JSON.stringify(ds.items.filter(i => chosen.includes(i.warehouse)))),
+      warehouses: chosen,
+      allWarehouses: [...new Set(ds.items.map(i => i.warehouse))],
       committee,
       opinion: '', generalNote: '', trip: {}, generalPhotos: [], reporterSignature: null
     };
@@ -514,7 +546,13 @@
       </div>
 
       <div class="card">
-        <h3>Báo cáo đi kiểm kê kho</h3>
+        <h3>Báo cáo kiểm kê</h3>
+        <h4>Ảnh bìa (trang đầu báo cáo)</h4>
+        ${coverOf(s) ? `<img src="${coverOf(s)}" class="cover-thumb" alt="ảnh bìa">` : '<p class="muted small">Chưa có ảnh bìa: báo cáo sẽ dùng ảnh bắt đầu kiểm kê.</p>'}
+        <div class="row gap">
+          <label class="btn small-btn">🖼 Chọn ảnh bìa<input type="file" accept="image/*" id="cov" hidden></label>
+          ${s.coverPhoto ? '<button class="btn small-btn" id="covrm">Dùng ảnh mặc định của nhà máy</button>' : ''}
+        </div>
         <label>Mục đích<textarea id="tp" placeholder="Mặc định: kiểm kê định kỳ, đối chiếu sổ sách, kiểm tra HSD">${E(tr.purpose || '')}</textarea></label>
         <label>Nhận xét, kết luận<textarea id="tc">${E(tr.conclusion || '')}</textarea></label>
         <label>Kiến nghị<textarea id="tk">${E(tr.recommendation || '')}</textarea></label>
@@ -538,7 +576,7 @@
         <h3>Xem trước</h3>
         <div class="row gap">
           <button class="btn small-btn" id="pv1">Biên bản kiểm kê</button>
-          <button class="btn small-btn" id="pv2">Báo cáo đi kiểm kê</button>
+          <button class="btn small-btn" id="pv2">Báo cáo kiểm kê</button>
         </div>
       </div>
 
@@ -607,13 +645,22 @@
         renderReview(id);
       }, 'Đang lấy vị trí và đóng dấu ảnh...');
     };
-    const preview = (doc, title) => guard(async () => {
+    $('#cov').onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      guard(async () => {
+        s.coverPhoto = await Util.compressImage(file, 1600, 0.8);
+        await DB.put('sessions', s);
+        renderReview(id);
+      }, 'Đang lưu ảnh bìa...');
+    };
+    if ($('#covrm')) $('#covrm').onclick = () => { s.coverPhoto = null; scheduleSave(); renderReview(id); };
+    const preview = (make, title) => guard(async () => {
       await DB.put('sessions', s);
-      const blob = await Reports.toBlob(doc());
-      Viewer.open(blob, title + ' (bản nháp)');
+      Viewer.open(await make(), title + ' (bản nháp)');
     }, 'Đang tạo bản xem trước...');
-    $('#pv1').onclick = () => preview(() => Reports.inventoryDoc(s, true), 'Biên bản kiểm kê');
-    $('#pv2').onclick = () => preview(() => Reports.tripDoc(s), 'Báo cáo đi kiểm kê');
+    $('#pv1').onclick = () => preview(() => Reports.toBlob(Reports.inventoryDoc(s, true)), 'Biên bản kiểm kê');
+    $('#pv2').onclick = () => preview(() => tripBlob(s), 'Báo cáo kiểm kê');
     $('#finish').onclick = () => finish(s);
   }
 
@@ -692,12 +739,33 @@
     go('#done/' + s.id);
   }
 
+  // Ảnh bìa: ảnh chọn riêng cho lần kiểm này, nếu không có thì ảnh mặc định của nhà máy (Cài đặt)
+  function coverOf(s) {
+    return s.coverPhoto || Covers.get(s.factory.code) || null;
+  }
+
+  // Báo cáo kiểm kê có chèn các trang biên bản đã ký (dạng ảnh)
+  async function tripBlob(s) {
+    // Biên bản đã ký (không kèm phụ lục ảnh) được chèn vào báo cáo dưới dạng ảnh từng trang
+    const signedBlob = await Reports.toBlob(Reports.inventoryDoc(s, true, { appendix: false }));
+    let minutesImages = [];
+    try {
+      // Không để việc chèn ảnh biên bản làm treo cả bước xuất file
+      minutesImages = await Promise.race([
+        Viewer.toImages(signedBlob),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000))
+      ]);
+    } catch (e) { console.warn('minutes images', e); }
+    return Reports.toBlob(Reports.tripDoc(s, { cover: coverOf(s), minutesImages }));
+  }
+
   async function buildFiles(s) {
     const n = Reports.fileNames(s);
+    const signed = await Reports.toBlob(Reports.inventoryDoc(s, true));
     return {
-      signed: { name: n.signed, blob: await Reports.toBlob(Reports.inventoryDoc(s, true)) },
+      signed: { name: n.signed, blob: signed },
       unsigned: { name: n.unsigned, blob: await Reports.toBlob(Reports.inventoryDoc(s, false)) },
-      trip: { name: n.trip, blob: await Reports.toBlob(Reports.tripDoc(s)) },
+      trip: { name: n.trip, blob: await tripBlob(s) },
       excel: { name: n.excel, blob: Reports.excelBlob(s) }
     };
   }
@@ -716,17 +784,20 @@
         <p class="small">${E(s.factory.name)} · ${Util.vnDate(s.countDate)} · kết thúc ${Util.vnDateTime(s.finishedAt)}<br>
         Đã kiểm ${sum.counted}/${sum.lines} dòng · ${sum.overLines} thừa · ${sum.shortLines} thiếu · ${sum.expired} hết hạn · ${sum.near} sắp hết hạn</p>
       </div>
-      ${[['signed', 'Biên bản kiểm kê (đã ký trên app)', n.signed], ['unsigned', 'Biên bản để in ký tay', n.unsigned], ['trip', 'Báo cáo đi kiểm kê kho', n.trip], ['excel', 'File Excel kết quả', n.excel]].map(([k, t, fn]) => `
+      ${Util.inAppBrowser ? '<div class="card warn-card small"><b>App đang mở trong Zalo/Facebook/Teams.</b> Các ứng dụng này chặn tải và chia sẻ file. Bấm ⋮ hoặc ⋯ → <b>Mở bằng trình duyệt</b> (Chrome/Safari), hoặc mở app từ biểu tượng trên màn hình chính.</div>' : ''}
+      ${[['trip', 'Báo cáo kiểm kê', n.trip], ['signed', 'Biên bản kiểm kê (đã ký trên app)', n.signed], ['unsigned', 'Biên bản để in ký tay', n.unsigned], ['excel', 'File Excel kết quả', n.excel]].map(([k, t, fn]) => `
         <div class="card">
           <b>${t}</b><div class="muted small">${E(fn)}</div>
           <div class="row gap">
             ${k !== 'excel' ? `<button class="btn small-btn" data-view="${k}">Xem</button>` : ''}
             <button class="btn small-btn" data-dl="${k}">Tải về</button>
             <button class="btn small-btn" data-share="${k}">Chia sẻ</button>
+            ${k !== 'excel' ? `<button class="btn small-btn" data-ext="${k}">Mở bằng app khác</button>` : ''}
             ${ms ? `<button class="btn small-btn" data-up="${k}">Gửi OneDrive</button>` : ''}
           </div>
         </div>`).join('')}
-      <p class="muted small">${Util.isIOS ? 'iPhone: nút Tải về mở bảng Chia sẻ, chọn "Lưu vào Tệp" để lưu file.' : 'File tải về nằm trong thư mục Tải xuống (Download) của điện thoại.'}</p>
+      <p class="muted small">${Util.isIOS ? 'iPhone: nút Tải về mở bảng Chia sẻ, chọn "Lưu vào Tệp" để lưu file.' : 'File tải về nằm trong thư mục Tải xuống (Download) của điện thoại. Nếu Tải về không được, bấm "Mở bằng app khác" rồi lưu từ trình xem PDF.'}</p>
+      <p class="muted small center">Phiên bản app ${window.APP_VERSION}</p>
       <button class="btn block" id="reopen">Mở lại để sửa (xóa chữ ký)</button>`;
 
     // File được tạo sẵn (lúc kết thúc hoặc ngay khi mở màn hình này) và giữ trong bộ nhớ,
@@ -746,6 +817,7 @@
     });
     $$('[data-dl]').forEach(b => b.onclick = () => doDownload(files[b.dataset.dl]));
     $$('[data-share]').forEach(b => b.onclick = () => doShare(files[b.dataset.share]));
+    $$('[data-ext]').forEach(b => b.onclick = () => act(() => Util.openExternal(files[b.dataset.ext].blob)));
     $$('[data-up]').forEach(b => b.onclick = () => guard(async () => {
       const f = files[b.dataset.up];
       const r = await OneDrive.queueUpload(f.name, f.blob);
@@ -809,6 +881,18 @@
       <p class="muted small center">Phiên bản ${window.APP_VERSION}</p>`;
 
     $('#addf').onclick = () => $('#facs').insertAdjacentHTML('beforeend', facRow({ code: '', name: '', address: '', inputFile: '' }));
+    $('#facs').onchange = e => {
+      if (!e.target.matches('.fcov') || !e.target.files[0]) return;
+      const row = e.target.closest('.fac');
+      const code = $('.fc', row).value.trim();
+      if (!code) return toast('Nhập mã nhà máy trước', 'err');
+      guard(async () => {
+        const data = await Util.compressImage(e.target.files[0], 1600, 0.8);
+        Covers.set(code, data);
+        $('.cov-row', row).firstElementChild.outerHTML = `<img src="${data}" class="cover-thumb small" alt="">`;
+        toast('Đã lưu ảnh bìa cho nhà máy ' + code);
+      }, 'Đang lưu ảnh...');
+    };
     $('#facs').onclick = e => {
       if (e.target.matches('.fdel')) e.target.closest('.fac').remove();
       if (e.target.matches('.fhere')) {
@@ -853,6 +937,10 @@
       <div class="row gap"><input class="fc" placeholder="Mã" value="${E(f.code)}" style="max-width:90px"><input class="fn" placeholder="Tên nhà máy" value="${E(f.name)}"></div>
       <div class="row gap"><input class="fa" placeholder="Địa chỉ (in trên biên bản)" value="${E(f.address || '')}"><input class="ff" placeholder="Tên file input, vd FDREPORT-333*.xlsx" value="${E(f.inputFile || '')}"></div>
       <div class="row gap"><input class="fg" placeholder="Toạ độ nhà máy: vĩ độ, kinh độ (để đối chiếu ảnh)" value="${f.lat != null && f.lat !== '' ? E(f.lat + ', ' + f.lng) : ''}"><button class="btn small-btn fhere">Lấy vị trí hiện tại</button></div>
+      <div class="row gap cov-row">
+        ${f.code && Covers.get(f.code) ? `<img src="${Covers.get(f.code)}" class="cover-thumb small" alt="">` : '<span class="muted small">Chưa có ảnh bìa báo cáo</span>'}
+        <label class="btn small-btn">🖼 Ảnh bìa báo cáo<input type="file" accept="image/*" class="fcov" hidden></label>
+      </div>
       <button class="btn small-btn fdel">Xóa nhà máy</button>
     </div>`;
   }
@@ -888,7 +976,20 @@
     window.addEventListener('pagehide', () => current && DB.put('sessions', current));
     refreshNet();
     route();
-    if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW', e));
+    if (Util.inAppBrowser) toast('Đang mở trong Zalo/Facebook/Teams: hãy mở bằng Chrome/Safari để tải và chia sẻ được file', 'err');
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register('sw.js').then(reg => reg.update()).catch(e => console.warn('SW', e));
+      // Có bản mới: hiện nút cập nhật (không tự tải lại để không mất chữ ký đang ký dở)
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || $('#updbar')) return;
+        const b = document.createElement('div');
+        b.id = 'updbar'; b.className = 'updbar';
+        b.innerHTML = 'Đã có phiên bản mới của app. <button class="btn small-btn">Cập nhật</button>';
+        b.querySelector('button').onclick = async () => { if (current) await DB.put('sessions', current); location.reload(); };
+        document.body.appendChild(b);
+      });
+    }
   }
   boot();
 })();
