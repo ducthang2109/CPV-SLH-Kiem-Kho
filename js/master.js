@@ -13,15 +13,17 @@ const Master = (function () {
     lng: ['kinh độ', 'kinh do', 'longitude', 'lng', 'long'],
     meatFile: ['file tồn meat', 'file ton meat', 'file meat', 'input file', 'meat file'],
     suppliesFile: ['file tồn vật tư', 'file ton vat tu', 'file vật tư', 'supplies file'],
+    packageFile: ['file tồn bao bì', 'file ton bao bi', 'file bao bì', 'file package', 'package file'],
     systemName: ['hệ thống meat', 'he thong meat', 'tên hệ thống', 'system'],
     suppliesSystem: ['hệ thống vật tư', 'he thong vat tu', 'supplies system'],
+    packageSystem: ['hệ thống bao bì', 'he thong bao bi', 'package system'],
     storekeeper: ['nhân viên kho', 'nhan vien kho'],
     storeManager: ['quản lý kho', 'quan ly kho'],
     accountant: ['kế toán', 'ke toan'],
     director: ['giám đốc nhà máy', 'giam doc nha may', 'giám đốc', 'giam doc']
   };
   const HEAD = ['ORG_CODE', 'Tên công ty', 'Tên nhà máy', 'Tên viết tắt', 'Địa chỉ', 'Vĩ độ', 'Kinh độ',
-    'File tồn Meat', 'File tồn vật tư', 'Hệ thống Meat', 'Hệ thống vật tư', 'Nhân viên kho', 'Quản lý kho', 'Kế toán', 'Giám đốc nhà máy'];
+    'File tồn Meat', 'File tồn vật tư', 'File tồn bao bì', 'Hệ thống Meat', 'Hệ thống vật tư', 'Hệ thống bao bì', 'Nhân viên kho', 'Quản lý kho', 'Kế toán', 'Giám đốc nhà máy'];
 
   function parse(arrayBuffer) {
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
@@ -36,8 +38,8 @@ const Master = (function () {
       return {
         code: v(r, 'code'), company: v(r, 'company'), name: v(r, 'name') || v(r, 'code'), shortName: v(r, 'shortName'),
         address: v(r, 'address'), lat: isNaN(lat) ? null : lat, lng: isNaN(lng) ? null : lng,
-        inputFile: v(r, 'meatFile'), suppliesFile: v(r, 'suppliesFile'),
-        systemName: v(r, 'systemName'), suppliesSystem: v(r, 'suppliesSystem'),
+        inputFile: v(r, 'meatFile'), suppliesFile: v(r, 'suppliesFile'), packageFile: v(r, 'packageFile'),
+        systemName: v(r, 'systemName'), suppliesSystem: v(r, 'suppliesSystem'), packageSystem: v(r, 'packageSystem'),
         signers: { storekeeper: v(r, 'storekeeper'), storeManager: v(r, 'storeManager'), accountant: v(r, 'accountant'), director: v(r, 'director') }
       };
     });
@@ -51,10 +53,10 @@ const Master = (function () {
   // File Excel mẫu để người dùng điền
   function templateBlob(factories) {
     const rows = [HEAD].concat((factories || []).map(f => [f.code, f.company || Config.get().companyName, f.name, f.shortName || '', f.address || '',
-      f.lat == null ? '' : f.lat, f.lng == null ? '' : f.lng, f.inputFile || '', f.suppliesFile || '', f.systemName || 'SmartSoft_Food', f.suppliesSystem || 'SAP',
+      f.lat == null ? '' : f.lat, f.lng == null ? '' : f.lng, f.inputFile || '', f.suppliesFile || '', f.packageFile || '', f.systemName || 'SmartSoft_Food', f.suppliesSystem || 'SAP', f.packageSystem || 'Winfood',
       (f.signers || {}).storekeeper || '', (f.signers || {}).storeManager || '', (f.signers || {}).accountant || '', (f.signers || {}).director || '']));
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = HEAD.map((h, i) => ({ wch: [10, 34, 30, 14, 50, 10, 10, 22, 22, 16, 16, 20, 20, 20, 24][i] }));
+    ws['!cols'] = HEAD.map((h, i) => ({ wch: [10, 34, 30, 14, 50, 10, 10, 22, 22, 22, 16, 16, 16, 20, 20, 20, 24][i] }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Master_NhaMay');
     return new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

@@ -86,10 +86,20 @@
   const TYPES = {
     branch: { icon: '🏭', name: 'Kiểm tra chi nhánh', desc: 'Checklist Đạt / Không đạt theo mẫu kiểm tra nhà máy, kèm ảnh và ký xác nhận' },
     meat: { icon: '🥩', name: 'Kiểm kê kho Meat', desc: 'Thành phẩm thịt: số lượng, trọng lượng, lô, hạn sử dụng, quét tem' },
-    supplies: { icon: '📦', name: 'Kiểm kê kho Spare part, Supplies, Package, Ingredient', desc: 'Vật tư, phụ tùng, bao bì, nguyên liệu: đếm số lượng theo mã SAP' }
+    supplies: { icon: '🔧', name: 'Kiểm kê kho Spare part, Supplies', desc: 'Phụ tùng, vật tư: file tồn SAP theo kho (0001, 0002...), đếm số lượng theo mã SAP' },
+    package: { icon: '📦', name: 'Kiểm kê kho Package, Ingredient', desc: 'Bao bì, nguyên liệu: báo cáo tồn PDF xuất từ chương trình (Data Package), đếm theo lô' }
   };
   const typeOf = s => (s && s.type) || 'meat';
-  const dsId = (code, type) => type === 'supplies' ? 'S:' + code : code;
+  const isQtyType = t => t === 'supplies' || t === 'package'; // chỉ đếm số lượng, không cân / hạn dùng
+  const dsId = (code, type) => type === 'supplies' ? 'S:' + code : type === 'package' ? 'P:' + code : code;
+  const TYPE_COLORS = { branch: '#f39200', meat: '#0a7a3c', supplies: '#1565c0', package: '#8e24aa' };
+  // Mã nhà máy trong file: khớp đúng, hoặc file SAP ghi Plant 4 ký tự (B657) cho nhà máy B65710
+  function matchFactory(org) {
+    if (!org) return null;
+    const list = Config.get().factories;
+    const o = String(org).toUpperCase();
+    return list.find(f => f.code.toUpperCase() === o) || list.find(f => f.code.toUpperCase().startsWith(o) || o.startsWith(f.code.toUpperCase())) || null;
+  }
 
   async function renderHome() {
     const user = Auth.currentUser();
@@ -159,12 +169,17 @@
 
   // ---------- tải dữ liệu ----------
   async function renderImport(code, type) {
-    type = type === 'supplies' ? 'supplies' : 'meat';
+    type = isQtyType(type) ? type : 'meat';
     const f = factoryOf(code);
     if (!f) return go('#factories/' + type);
     setTitle('Tải dữ liệu · ' + f.name, '#factories/' + type);
     const ms = Auth.useMicrosoft();
-    const pattern = type === 'supplies' ? (f.suppliesFile || '*.xlsx') : (f.inputFile || '*.xlsx');
+    const pattern = type === 'supplies' ? (f.suppliesFile || '*.xlsx') : type === 'package' ? (f.packageFile || `Data Package/${f.code}_*.pdf`) : (f.inputFile || '*.xlsx');
+    const HELP = {
+      supplies: 'File tồn SAP của từng kho (vd 0001.xlsx, 0002.xlsx) với các cột Plant, Storage Location, Material, Material Description, Base Unit of Measure, Unrestricted. Chọn được nhiều file một lúc, mỗi file là một kho.',
+      package: 'File PDF "Inventory Report" xuất từ chương trình (thư mục Data Package, vd B43210_12.10.pdf). App đọc số tồn Balance của từng lô; file PDF gốc được đính kèm vào báo cáo. Cũng nhận file Excel có cột Mã, Tên, Lô, Số lượng.',
+      meat: 'File tồn kho theo mẫu FDREPORT (có ORG_CODE thì app tự nhận nhà máy).'
+    };
     view().innerHTML = `
       ${ms ? `<div class="card">
         <h3>Tự tìm trên OneDrive</h3>
@@ -174,40 +189,47 @@
       </div>` : ''}
       <div class="card">
         <h3>Lấy file qua app OneDrive trên điện thoại</h3>
-        <p class="muted small">${type === 'supplies' ? 'File tồn vật tư cần các cột: Mã SAP, Tên sản phẩm, ĐVT, Số lượng, Kho (mẫu: Mau_TonKho_VatTu.xlsx trong Input).' : 'File tồn kho theo mẫu FDREPORT (có ORG_CODE thì app tự nhận nhà máy).'} File chỉ lấy khi bạn bấm, không tự cập nhật.</p>
+        <p class="muted small">${HELP[type]} File chỉ lấy khi bạn bấm, không tự cập nhật.</p>
         <ul class="small steps">
           <li><b>Android:</b> bấm nút dưới → ☰ → <b>OneDrive</b> → Apps Kiem Kho → Input → chọn file ${E(pattern)}.</li>
           <li><b>iPhone:</b> bấm nút dưới → <b>Chọn tệp</b> → Duyệt → <b>OneDrive</b> → Apps Kiem Kho → Input → chọn file.</li>
         </ul>
-        <label class="btn ${ms ? '' : 'primary'} block">Chọn file Excel<input type="file" id="file" hidden accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></label>
+        <label class="btn ${ms ? '' : 'primary'} block">${type === 'package' ? 'Chọn file PDF / Excel' : type === 'supplies' ? 'Chọn file Excel (chọn được nhiều file)' : 'Chọn file Excel'}<input type="file" id="file" hidden ${type === 'supplies' ? 'multiple' : ''} accept="${type === 'package' ? '.pdf,application/pdf,' : ''}.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></label>
       </div>
       <div id="preview"></div>`;
 
-    const load = (buf, name, fileDate) => guard(async () => {
-      const ds = Importer.parse(buf, name, type);
+    const parseOne = async (buf, name) => /\.pdf$/i.test(name) ? PdfStock.parse(buf, name) : Importer.parse(buf, name, type === 'meat' ? 'meat' : 'supplies');
+    // files: [{ buf, name, fileDate }]
+    const load = files => guard(async () => {
+      const parsed = [];
+      for (const x of files) parsed.push(await parseOne(x.buf, x.name));
+      const ds = Importer.merge(parsed);
       let target = f;
-      // File có ORG_CODE: tự liên kết với nhà máy trong Master
-      if (ds.orgCode && ds.orgCode !== f.code) {
-        const other = factoryOf(ds.orgCode);
-        if (other && confirm(`File này của nhà máy ${other.name} (${ds.orgCode}), không phải ${f.name}. Lưu dữ liệu cho ${other.name}?`)) target = other;
-        else if (!other) toast(`File có ORG_CODE ${ds.orgCode} chưa có trong Master nhà máy`, 'err');
-      }
+      // File có ORG_CODE / Plant: tự liên kết với nhà máy trong Master
+      const other = matchFactory(ds.orgCode);
+      if (ds.orgCode && other && other.code !== f.code) {
+        if (confirm(`File này của nhà máy ${other.name} (${ds.orgCode}), không phải ${f.name}. Lưu dữ liệu cho ${other.name}?`)) target = other;
+      } else if (ds.orgCode && !other) toast(`File có mã nhà máy ${ds.orgCode} chưa có trong Master nhà máy`, 'err');
       ds.id = dsId(target.code, type);
-      ds.fileDate = fileDate || null;
+      ds.fileDate = files.map(x => x.fileDate).filter(Boolean).sort().pop() || null;
+      // Giữ file PDF gốc của chương trình để đính kèm vào báo cáo
+      const pdfs = files.filter(x => /\.pdf$/i.test(x.name));
+      ds.sourceFiles = pdfs.map(x => ({ name: x.name, blob: new Blob([x.buf], { type: 'application/pdf' }) }));
       await DB.put('datasets', ds);
       showPreview(ds, target, type);
     }, 'Đang đọc file...');
 
     $('#file').onchange = async e => {
-      const file = e.target.files[0];
-      if (file) load(await file.arrayBuffer(), file.name, file.lastModified ? new Date(file.lastModified).toISOString() : null);
+      const list = [];
+      for (const file of e.target.files) list.push({ buf: await file.arrayBuffer(), name: file.name, fileDate: file.lastModified ? new Date(file.lastModified).toISOString() : null });
+      if (list.length) load(list);
     };
     if ($('#od')) $('#od').onclick = () => guard(async () => {
       const { folder, match, all } = await OneDrive.findInputFile(Object.assign({}, f, { inputFile: pattern }));
       $('#odList').innerHTML = all.map(x => `<button class="btn block ${match && x.name === match.name ? 'primary' : ''}" data-f="${E(x.name)}">${E(x.name)} <span class="small">· ${Util.vnDateTime(x.lastModifiedDateTime)}</span></button>`).join('') || '<p class="muted">Không thấy file Excel trong thư mục.</p>';
       $$('#odList [data-f]').forEach(b => b.onclick = () => guard(async () => {
         const meta = all.find(x => x.name === b.dataset.f);
-        load(await OneDrive.download(folder, b.dataset.f), b.dataset.f, meta && meta.lastModifiedDateTime);
+        load([{ buf: await OneDrive.download(folder, b.dataset.f), name: b.dataset.f, fileDate: meta && meta.lastModifiedDateTime }]);
       }, 'Đang tải từ OneDrive...'));
       if (match) toast('Tìm thấy ' + match.name);
     }, 'Đang tìm file trên OneDrive...');
@@ -219,7 +241,7 @@
     $('#preview').innerHTML = `
       <div class="card ok-card">
         <h3>Đã tải ${ds.items.length} dòng · ${E(f.name)}</h3>
-        <p class="small">File: ${E(ds.fileName)}${ds.orgCode ? ' · ORG_CODE ' + E(ds.orgCode) : ''}${ds.stockDate ? ' · tồn ngày ' + Util.vnDate(ds.stockDate) : ''} · Bảng mã: ${ds.encoding}</p>
+        <p class="small">File: ${E(ds.fileName)}${ds.orgCode ? ' · mã nhà máy ' + E(ds.orgCode) : ''}${ds.stockDate ? ' · tồn ngày ' + Util.vnDate(ds.stockDate) : ''} · ${ds.encoding === 'PDF' ? 'đọc từ PDF chương trình' : 'Bảng mã: ' + ds.encoding}${ds.skippedZero ? ` · bỏ ${ds.skippedZero} lô tồn bằng 0` : ''}</p>
         ${ds.fileDate ? `<p class="small ${Util.isoDate(new Date(ds.fileDate)) === Util.today() ? '' : 'warnc-text'}">File cập nhật lúc ${Util.vnDateTime(ds.fileDate)}${Util.isoDate(new Date(ds.fileDate)) === Util.today() ? '' : ' (không phải hôm nay, kiểm tra lại có đúng file mới nhất không)'}</p>` : ''}
         <ul class="small">${Object.entries(wh).map(([k, v]) => `<li>${E(k)}: ${v} dòng</li>`).join('')}</ul>
         <p class="small muted">Dữ liệu đã lưu trên máy, có thể kiểm kê không cần mạng.</p>
@@ -266,7 +288,7 @@
       { role: 'Kế toán trưởng', title: '', name: '' },
       { role: 'Giám đốc', title: '', name: sg.director || '' }
     ];
-    if (type === 'supplies') return [
+    if (isQtyType(type)) return [
       { role: 'Nhân Viên Kho', title: '', name: sg.storekeeper || '' },
       { role: 'Quản lý kho', title: '', name: sg.storeManager || '' },
       { role: 'Kế Toán', title: '', name: sg.accountant || user.name },
@@ -304,7 +326,7 @@
       id: Util.uid(),
       type,
       factory: { code: f.code, name: f.name, shortName: f.shortName || '', address: f.address || '', lat: f.lat, lng: f.lng,
-        systemName: f.systemName || '', suppliesSystem: f.suppliesSystem || '', signers: f.signers || {} },
+        systemName: f.systemName || '', suppliesSystem: f.suppliesSystem || '', packageSystem: f.packageSystem || '', signers: f.signers || {} },
       checkIn: null, checkOut: null,
       companyName: f.company || cfg.companyName,
       user: { email: user.email, name: user.name },
@@ -322,6 +344,8 @@
       opinion: '', generalNote: '', trip: {}, generalPhotos: [], reporterSignature: null
     };
     await DB.put('sessions', s);
+    // File PDF gốc từ chương trình đi kèm phiên kiểm (đính kèm vào bộ file kết quả)
+    if (ds && (ds.sourceFiles || []).length) await DB.put('files', { id: 'src:' + s.id, files: ds.sourceFiles });
     go('#count/' + s.id);
   }
 
@@ -574,7 +598,7 @@
   }
 
   function itemCard(it, s) {
-    if (typeOf(s) === 'supplies') return supplyCard(it, s);
+    if (isQtyType(typeOf(s))) return supplyCard(it, s);
     const e = Util.expiry(it, s.countDate, Config.get());
     const multi = (it.weighs || []).length > 0;
     const left = it.actualQty != null ? Util.round(it.sysQty - it.actualQty) : null;
@@ -615,6 +639,7 @@
     return `<div class="card item ${it.actualQty != null ? 'counted' : ''}" data-id="${it.id}">
       <div class="row between"><b>${E(it.code)}</b><span class="tag">${E(it.unit || '')}</span></div>
       <div class="name">${E(it.name)}${it.isExtra ? ' <span class="tag">ngoài sổ sách</span>' : ''}</div>
+      ${it.lot ? `<div class="meta">Lô <b>${E(it.lot)}</b></div>` : ''}
       <div class="meta">${E(it.warehouse)} · Sổ sách: <b>${F(it.sysQty)}</b> ${E(it.unit || '')}</div>
       <div class="row gap inputs">
         <label>SL thực tế<input type="number" inputmode="decimal" step="any" class="aq" value="${it.actualQty == null ? '' : it.actualQty}" ${multi ? 'readonly' : ''}></label>
@@ -673,7 +698,7 @@
       const qty = Number(el.querySelector('.wq').value) || 0;
       const wgh = Number(el.querySelector('.ww').value);
       if (!(wgh > 0) && !(qty > 0)) return toast('Nhập số lượng hoặc khối lượng', 'err');
-      if (typeOf(s) === 'supplies' && !(qty > 0)) return toast('Nhập số lượng', 'err');
+      if (isQtyType(typeOf(s)) && !(qty > 0)) return toast('Nhập số lượng', 'err');
       // Lần cân đầu tiên mà trước đó đã nhập tay: giữ số nhập tay làm lần #1
       if (!(it.weighs || []).length && it.actualQty != null) {
         it.weighs = [{ qty: it.actualQty, wgh: Util.actualWgh(it), time: new Date().toISOString(), src: 'manual' }];
@@ -682,7 +707,7 @@
       it.weighs.push({ qty, wgh: wgh || 0, time: new Date().toISOString(), src: 'manual' });
       Util.applyWeighs(it); Util.touch(it);
       clearSignatures(s); scheduleSave(); redraw(true);
-      toast(typeOf(s) === 'supplies' ? `Đã cộng lần đếm #${it.weighs.length}: tổng ${F(it.actualQty)} ${it.unit || ''}` : `Đã ghi lần cân #${it.weighs.length}: tổng ${F(it.actualQty)} ĐV · ${F(it.actualWgh)} kg`);
+      toast(isQtyType(typeOf(s)) ? `Đã cộng lần đếm #${it.weighs.length}: tổng ${F(it.actualQty)} ${it.unit || ''}` : `Đã ghi lần cân #${it.weighs.length}: tổng ${F(it.actualQty)} ĐV · ${F(it.actualWgh)} kg`);
     };
     el.querySelector('.wadd').onclick = addW;
     el.querySelector('.ww').onkeydown = e => { if (e.key === 'Enter') addW(); };
@@ -806,7 +831,7 @@
         <label>Kiến nghị<textarea id="tk">${E(tr.recommendation || '')}</textarea></label>
         <button class="btn small-btn" id="auto">Gợi ý nội dung từ kết quả</button>
         <h4>Hình ảnh hiện trường</h4>
-        ${typeOf(s) === 'supplies' ? `<label class="small">Ảnh của kho<select id="gwh"><option value="">Ảnh chung</option>${[...new Set(s.items.map(i => i.warehouse))].map(w => `<option>${E(w)}</option>`).join('')}</select></label>` : ''}
+        ${isQtyType(typeOf(s)) ? `<label class="small">Ảnh của kho<select id="gwh"><option value="">Ảnh chung</option>${[...new Set(s.items.map(i => i.warehouse))].map(w => `<option>${E(w)}</option>`).join('')}</select></label>` : ''}
         <label class="btn small-btn">📷 Thêm ảnh<input type="file" accept="image/*" capture="environment" id="gph" hidden multiple></label>
         <div class="thumbs">${s.generalPhotos.map((p, i) => `<div class="thumb"><img src="${p.data}" alt=""><button data-grm="${i}">×</button></div>`).join('')}</div>
       </div>
@@ -909,8 +934,9 @@
       await DB.put('sessions', s);
       Viewer.open(await make(), title + ' (bản nháp)');
     }, 'Đang tạo bản xem trước...');
-    $('#pv1').onclick = () => preview(() => Reports.toBlob(Reports.inventoryDoc(s, true)), 'Biên bản kiểm kê');
-    $('#pv2').onclick = () => preview(() => tripBlob(s), 'Báo cáo kiểm kê');
+    const qty = isQtyType(typeOf(s));
+    $('#pv1').onclick = () => preview(() => Reports.toBlob(qty ? Docs2.suppliesRecordDoc(s, true) : Reports.inventoryDoc(s, true)), 'Biên bản kiểm kê');
+    $('#pv2').onclick = () => preview(() => qty ? suppliesReportBlob(s) : tripBlob(s), 'Báo cáo kiểm kê');
     $('#finish').onclick = () => finish(s);
   }
 
@@ -980,13 +1006,68 @@
       await DB.put('files', { id: s.id, files });
       if (Auth.useMicrosoft()) {
         // Bản biên bản trống chữ ký + báo cáo + Excel trả về thư mục Output để ký thêm bên ngoài
-        for (const k of ['unsigned', 'signed', 'trip', 'excel']) await DB.put('outbox', { id: Util.uid(), name: files[k].name, folder: Config.get().oneDrive.outputFolder, blob: files[k].blob, createdAt: Date.now() });
+        for (const k of FILE_ORDER.filter(k => files[k])) await DB.put('outbox', { id: Util.uid(), name: files[k].name, folder: Config.get().oneDrive.outputFolder, blob: files[k].blob, createdAt: Date.now() });
         const r = await OneDrive.flushOutbox().catch(() => ({ sent: 0 }));
         toast(r.sent ? `Đã gửi ${r.sent} file lên OneDrive/Output` : 'Đang offline: file sẽ tự gửi lên OneDrive khi có mạng');
       }
     }, 'Đang tạo biên bản PDF...');
+    // Lưu file + lịch sử lên dữ liệu chung (không có mạng thì tự gửi lại sau)
+    if (Cloud.enabled()) {
+      Cloud.enqueue(s.id);
+      await guard(async () => {
+        const r = await flushCloud();
+        if (r.failed) toast('Chưa lưu được lên dữ liệu chung, app sẽ tự gửi lại khi có mạng', 'err');
+        else if (r.sent) toast('Đã lưu biên bản và lịch sử lên dữ liệu chung');
+      }, 'Đang lưu lên dữ liệu chung...');
+    }
     refreshNet();
     go('#done/' + s.id);
+  }
+
+  // ---------- dữ liệu chung (GitHub riêng tư) ----------
+  function cloudRecord(s) {
+    return Object.assign(summaryOf(s), { docNo: docNoOf(s), local: undefined, sourceFile: s.sourceFile || '' });
+  }
+  // Gửi các phiên đã kết thúc đang chờ: file PDF/Excel + dòng lịch sử
+  let flushing = null;
+  function flushCloud() {
+    if (!Cloud.enabled() || !navigator.onLine) return Promise.resolve({ sent: 0, failed: 0 });
+    if (flushing) return flushing;
+    flushing = (async () => {
+      let sent = 0, failed = 0;
+      for (const id of Cloud.queue()) {
+        try {
+          const s = await DB.get('sessions', id);
+          if (!s) { Cloud.setQueue(Cloud.queue().filter(x => x !== id)); continue; }
+          const rec = cloudRecord(s);
+          if (s.status === 'done') {
+            let files = (await DB.get('files', s.id) || {}).files;
+            if (!files) { files = await buildFiles(s); await DB.put('files', { id: s.id, files }); }
+            await Cloud.upload(s, files, rec);
+          } else await Cloud.saveHistory(rec);
+          s.cloud = { at: new Date().toISOString(), files: rec.files || [] };
+          await DB.put('sessions', s);
+          if (current && current.id === s.id) current.cloud = s.cloud;
+          Cloud.setQueue(Cloud.queue().filter(x => x !== id));
+          sent++;
+        } catch (e) { console.warn('cloud', id, e); failed++; }
+      }
+      return { sent, failed };
+    })().finally(() => { flushing = null; });
+    return flushing;
+  }
+  // Ghi lịch sử "đang kiểm" ngay khi bắt đầu để dashboard chung thấy ai đang đi kiểm
+  function cloudTouch(s) {
+    if (!Cloud.enabled()) return;
+    Cloud.enqueue(s.id);
+    flushCloud().catch(() => {});
+  }
+  function cloudStatusCard(s) {
+    if (!Cloud.enabled()) return `<div class="card small muted">Chưa bật lưu dữ liệu chung: file và lịch sử chỉ nằm trên máy này. Quản trị viên vào ⚙ Cài đặt → <b>Dữ liệu chung</b> để bật.</div>`;
+    const pending = Cloud.queue().includes(s.id) || !s.cloud;
+    return `<div class="card small ${pending ? 'warn-card' : 'ok-card'}">${pending
+      ? `☁ Chưa lưu lên dữ liệu chung. <button class="btn small-btn" id="cloudNow">Gửi ngay</button>`
+      : `☁ Đã lưu ${(s.cloud && s.cloud.files || []).length} file và lịch sử lên dữ liệu chung${s.cloud ? ' lúc ' + Util.vnDateTime(s.cloud.at) : ''}. Máy khác xem lại được trong Dashboard.`}</div>`;
   }
 
   // Ảnh bìa: ảnh chọn riêng cho lần kiểm này, nếu không có thì ảnh mặc định của nhà máy (Cài đặt)
@@ -1020,8 +1101,15 @@
         whImages[wh] = await Promise.race([Viewer.toImages(b), new Promise((_, rj) => setTimeout(() => rj(new Error('timeout')), 30000))]);
       } catch (e) { console.warn('wh images', e); }
     }
-    return Reports.toBlob(Docs2.suppliesReportDoc(s, { whImages }));
+    // Package: chèn các trang báo cáo tồn PDF gốc của chương trình vào báo cáo
+    let sourceImages = [];
+    const src = await sourceFiles(s);
+    for (const f of src) {
+      try { sourceImages = sourceImages.concat(await Promise.race([Viewer.toImages(f.blob), new Promise((_, rj) => setTimeout(() => rj(new Error('timeout')), 30000))])); } catch (e) { console.warn('src images', e); }
+    }
+    return Reports.toBlob(Docs2.suppliesReportDoc(s, { whImages, sourceImages, sourceNames: src.map(f => f.name) }));
   }
+  async function sourceFiles(s) { return ((await DB.get('files', 'src:' + s.id)) || {}).files || []; }
 
   async function buildFiles(s) {
     const t = typeOf(s);
@@ -1032,12 +1120,16 @@
         unsigned: { name: n.unsigned, blob: await Reports.toBlob(Docs2.branchRecordDoc(s, false)) },
         excel: { name: n.excel, blob: Docs2.branchExcel(s) }
       };
-      return {
+      const out = {
         trip: { name: n.trip, blob: await suppliesReportBlob(s) },
         signed: { name: n.signed, blob: await Reports.toBlob(Docs2.suppliesRecordDoc(s, true)) },
         unsigned: { name: n.unsigned, blob: await Reports.toBlob(Docs2.suppliesRecordDoc(s, false)) },
         excel: { name: n.excel, blob: Docs2.suppliesExcel(s) }
       };
+      // Báo cáo tồn PDF gốc từ chương trình đính kèm theo biên bản
+      const src = await sourceFiles(s);
+      if (src.length) out.source = { name: `${Docs2.docNo(s)}_TonChuongTrinh_${Util.safeName(src[0].name.replace(/\.pdf$/i, ''))}.pdf`, blob: src[0].blob };
+      return out;
     }
     const n = Reports.fileNames(s);
     const signed = await Reports.toBlob(Reports.inventoryDoc(s, true));
@@ -1058,6 +1150,15 @@
     const n = fileNamesFor(s);
     const ms = Auth.useMicrosoft();
     const bsum = typeOf(s) === 'branch' ? Docs2.branchSummary(s) : null;
+    // File được tạo sẵn (lúc kết thúc hoặc ngay khi mở màn hình này) và giữ trong bộ nhớ,
+    // vì điện thoại chỉ cho tải/chia sẻ khi lệnh chạy ngay trong lần bấm.
+    let files = (await DB.get('files', s.id) || {}).files;
+    if (!files) {
+      busy(true, 'Đang tạo file...');
+      try { files = await buildFiles(s); await DB.put('files', { id: s.id, files }); } catch (e) { toast(e.message, 'err'); } finally { busy(false); }
+    }
+    if (!files) return;
+    const keys = FILE_ORDER.filter(k => files[k] && files[k].blob);
     view().innerHTML = `
       <div class="card ok-card">
         <h3>${E(docNoOf(s))}</h3>
@@ -1074,7 +1175,8 @@
           <p class="muted small">Muốn app tự lưu thẳng vào Output không cần chọn thư mục: IT cấp Client ID Microsoft 365 rồi nhập ở ⚙ Cài đặt.</p>`}
       </div>
       ${Util.inAppBrowser ? '<div class="card warn-card small"><b>App đang mở trong Zalo/Facebook/Teams.</b> Các ứng dụng này chặn tải và chia sẻ file. Bấm ⋮ hoặc ⋯ → <b>Mở bằng trình duyệt</b> (Chrome/Safari), hoặc mở app từ biểu tượng trên màn hình chính.</div>' : ''}
-      ${Object.keys(n).filter(k => FILE_LABELS[k]).sort((a, b) => ['trip', 'signed', 'unsigned', 'excel'].indexOf(a) - ['trip', 'signed', 'unsigned', 'excel'].indexOf(b)).map(k => [k, FILE_LABELS[k], n[k]]).map(([k, t, fn]) => `
+      ${cloudStatusCard(s)}
+      ${keys.map(k => [k, FILE_LABELS[k], files[k].name]).map(([k, t, fn]) => `
         <div class="card">
           <b>${t}</b><div class="muted small">${E(fn)}</div>
           <div class="row gap">
@@ -1089,14 +1191,6 @@
       <p class="muted small center">Phiên bản app ${window.APP_VERSION}</p>
       <button class="btn block" id="reopen">Mở lại để sửa (xóa chữ ký)</button>`;
 
-    // File được tạo sẵn (lúc kết thúc hoặc ngay khi mở màn hình này) và giữ trong bộ nhớ,
-    // vì điện thoại chỉ cho tải/chia sẻ khi lệnh chạy ngay trong lần bấm.
-    let files = (await DB.get('files', s.id) || {}).files;
-    if (!files) {
-      busy(true, 'Đang tạo file...');
-      try { files = await buildFiles(s); await DB.put('files', { id: s.id, files }); } catch (e) { toast(e.message, 'err'); } finally { busy(false); }
-    }
-    if (!files) return;
     const act = (fn) => { try { const p = fn(); if (p && p.catch) p.catch(e => toast(e.message, 'err')); } catch (e) { toast(e.message, 'err'); } };
     const doDownload = f => act(() => Util.download(f.blob, f.name));
     const doShare = f => act(() => Util.share(f.blob, f.name));
@@ -1107,7 +1201,8 @@
     $$('[data-dl]').forEach(b => b.onclick = () => doDownload(files[b.dataset.dl]));
     $$('[data-share]').forEach(b => b.onclick = () => doShare(files[b.dataset.share]));
     $$('[data-ext]').forEach(b => b.onclick = () => act(() => Util.openExternal(files[b.dataset.ext].blob)));
-    const all = ['trip', 'signed', 'unsigned', 'excel'].map(k => files[k]).filter(Boolean);
+    const all = keys.map(k => files[k]);
+    if ($('#cloudNow')) $('#cloudNow').onclick = () => guard(async () => { Cloud.enqueue(s.id); const r = await flushCloud(); if (r.failed) toast('Chưa gửi được, kiểm tra mạng hoặc mã kết nối', 'err'); current = null; renderDone(id); }, 'Đang lưu lên dữ liệu chung...');
     $('#odall').onclick = () => {
       if (ms) {
         guard(async () => {
@@ -1151,8 +1246,10 @@
       : { trip: `${b}_BaoCaoKiemKe.pdf`, signed: `${b}_BienBan_DaKy.pdf`, unsigned: `${b}_BienBan_KyTay.pdf`, excel: `${b}_KetQua.xlsx` };
   }
   const FILE_LABELS = {
-    trip: 'Báo cáo kiểm kê (slide)', signed: 'Biên bản (đã ký trên app)', unsigned: 'Biên bản để in ký tay', excel: 'File Excel kết quả'
+    trip: 'Báo cáo kiểm kê (slide)', signed: 'Biên bản (đã ký trên app)', unsigned: 'Biên bản để in ký tay', excel: 'File Excel kết quả',
+    source: 'Báo cáo tồn từ chương trình (PDF gốc, đính kèm)'
   };
+  const FILE_ORDER = ['trip', 'signed', 'unsigned', 'source', 'excel'];
 
   // ---------- kiểm tra chi nhánh: checklist ----------
   function renderChecklist(s) {
@@ -1326,14 +1423,16 @@
     const byMonth = Array.from({ length: 12 }, (_, m) => {
       const mm = String(m + 1).padStart(2, '0');
       const r = inYear.filter(h => h.date.slice(5, 7) === mm);
-      return { mm, n: r.length, t: { branch: r.filter(h => h.type === 'branch').length, meat: r.filter(h => h.type === 'meat').length, supplies: r.filter(h => h.type === 'supplies').length } };
+      const t = {};
+      Object.keys(TYPES).forEach(k => { t[k] = r.filter(h => h.type === k).length; });
+      return { mm, n: r.length, t };
     });
     const max = Math.max(1, ...byMonth.map(b => b.n));
     const done = list.filter(h => h.status === 'done');
     const diffLines = list.reduce((a, h) => a + (h.stats.diff || 0) + (h.stats.fail || 0), 0);
     const byUser = new Map();
     list.forEach(h => { if (!byUser.has(h.user)) byUser.set(h.user, []); byUser.get(h.user).push(h); });
-    const COLORS = { branch: '#f39200', meat: '#0a7a3c', supplies: '#1565c0' };
+    const COLORS = TYPE_COLORS;
     view().innerHTML = `
       <div class="card">
         <div class="row gap">
@@ -1355,7 +1454,7 @@
         <h3>Số lần kiểm theo tháng · ${E(st.year)}</h3>
         <div class="mchart">${byMonth.map(b => `
           <div class="mcol ${b.mm === st.month ? 'sel' : ''}" data-m="${b.mm}" title="Tháng ${Number(b.mm)}: ${b.n} lần">
-            <div class="mbar" style="height:${b.n / max * 100}%">${['supplies', 'meat', 'branch'].map(k => b.t[k] ? `<div style="flex:${b.t[k]};background:${COLORS[k]}"></div>` : '').join('')}</div>
+            <div class="mbar" style="height:${b.n / max * 100}%">${['package', 'supplies', 'meat', 'branch'].map(k => b.t[k] ? `<div style="flex:${b.t[k]};background:${COLORS[k]}"></div>` : '').join('')}</div>
             <div class="mval">${b.n || ''}</div><div class="mlab">T${Number(b.mm)}</div>
           </div>`).join('')}
         </div>

@@ -19,12 +19,14 @@ const Config = (function () {
     }
     return cache;
   }
-  function save(patch) {
+  // opts.fromCloud: đang nhận cài đặt từ dữ liệu chung, không gửi ngược lên
+  function save(patch, opts) {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { /* bỏ qua */ }
     Object.assign(saved, patch);
     localStorage.setItem(KEY, JSON.stringify(saved));
     cache = null;
+    if (!(opts && opts.fromCloud) && typeof Cloud !== 'undefined') Cloud.pushConfigSoon();
     return get();
   }
   return { get, save };

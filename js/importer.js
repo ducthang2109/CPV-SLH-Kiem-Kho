@@ -14,9 +14,13 @@ const Importer = (function () {
     ages: ['ages(day)', 'ages', 'tuoi'],
     unit: ['unit', 'uom', 'dvt', 'đvt', 'don vi', 'đơn vị', 'base unit of measure', 'bun'],
     shelfLife: ['shelf life ages', 'shelf life', 'shelf_life', 'han su dung', 'hạn sử dụng', 'hsd'],
-    org: ['org_code', 'org', 'ma don vi'],          // mã nhà máy, ví dụ B43210
+    org: ['org_code', 'org', 'ma don vi', 'plant'], // mã nhà máy, ví dụ B43210 (file SAP: Plant B657)
+    value: ['value unrestricted', 'giá trị', 'gia tri', 'value', 'thành tiền'], // giá trị tồn (file SAP)
     stockDate: ['stk_doc_date', 'stock date', 'ngay ton'] // ngày chốt số liệu tồn
   };
+
+  // Tên kho theo mã Storage Location khi file SAP chỉ có mã kho (0001, 0002...)
+  const WH_NAMES = { '0001': 'Spare Parts', '0002': 'Supplies', '0003': 'Ingredient', '8010': 'Packaging Main WH', '8020': 'PKG WH for Production' };
 
   const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -138,6 +142,7 @@ const Importer = (function () {
       const raw = idx.location != null ? txt(r[idx.location]) : '';
       const name = idx.whName != null ? txt(r[idx.whName]) : '';
       if (raw && name && !raw.includes(' - ')) return parseLocation(`${raw} - ${name}`);
+      if (/^\d{3,5}$/.test(raw)) return parseLocation(`${raw} - ${WH_NAMES[raw] || 'Kho ' + raw}`);
       return parseLocation(raw || name || 'Kho');
     };
 
@@ -157,6 +162,7 @@ const Importer = (function () {
         prodDate: idx.prodDate != null ? parseDate(r[idx.prodDate]) : null,
         sysQty: num(r[idx.qty]),
         sysWgh: idx.wgh != null ? num(r[idx.wgh]) : 0,
+        sysValue: idx.value != null ? num(r[idx.value]) : null,
         ages: idx.ages != null ? String(r[idx.ages]) : '',
         shelfLife: idx.shelfLife != null ? num(r[idx.shelfLife]) : 0,
         actualQty: null,
@@ -170,5 +176,13 @@ const Importer = (function () {
     return { fileName, mode, importedAt: new Date().toISOString(), encoding: isTcvn3 ? 'TCVN3' : 'Unicode', sites: [...sites], orgCode, stockDate, items };
   }
 
-  return { parse, parseDate, parseLocation };
+  // Gộp nhiều file tồn (vd 0001.xlsx + 0002.xlsx: mỗi file một kho SAP) thành một bộ dữ liệu
+  function merge(list) {
+    if (list.length === 1) return list[0];
+    const items = [];
+    list.forEach((d, k) => d.items.forEach(it => items.push(Object.assign(it, { id: 'F' + (k + 1) + it.id }))));
+    return Object.assign({}, list[0], { fileName: list.map(d => d.fileName).join(' + '), items, sites: [...new Set([].concat(...list.map(d => d.sites)))] });
+  }
+
+  return { parse, merge, parseDate, parseLocation, WH_NAMES };
 })();

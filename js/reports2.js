@@ -11,7 +11,7 @@ const Docs2 = (function () {
   const hmph = ts => { if (!ts) return '.......'; const d = new Date(ts); return `${two(d.getHours())}h:${two(d.getMinutes())}ph`; };
   const dmy = iso => { const [y, m, d] = iso.split('-'); return `${d}-${m}-${y}`; };
   const dateWords = iso => { const [y, m, d] = iso.split('-'); return `Ngày ${d} tháng ${m} năm ${y}`; };
-  const docNo = s => `${s.type === 'branch' ? 'KTCN' : 'BBVT'}-${s.factory.code}-${s.countDate.replace(/-/g, '')}`;
+  const docNo = s => `${s.type === 'branch' ? 'KTCN' : s.type === 'package' ? 'BBPK' : 'BBVT'}-${s.factory.code}-${s.countDate.replace(/-/g, '')}`;
   const whName = it => it.warehouseCode ? it.warehouse.replace(new RegExp('^' + it.warehouseCode + '\\s*-\\s*'), '') : it.warehouse;
 
   function byWarehouse(items) {
@@ -71,13 +71,18 @@ const Docs2 = (function () {
     groups.forEach(([wh, list], gi) => {
       const w = list[0];
       const t = whTimes(s, list);
-      const sys = w.system || s.factory.suppliesSystem || 'SAP';
+      const pkg = s.type === 'package';
+      const sys = w.system || (pkg ? s.factory.packageSystem || 'Winfood' : s.factory.suppliesSystem || 'SAP');
+      const hasLot = list.some(i => i.lot);
       const H = (txt, o = {}) => Object.assign({ text: txt, bold: true, alignment: 'center', fontSize: 8, color: '#fff', fillColor: GREEN }, o);
+      // Thêm cột Số lô khi dữ liệu có lô (kho bao bì / nguyên liệu)
+      const L = (a, b) => hasLot ? [a, b] : [a];
+      const ncol = hasLot ? 9 : 8;
       const body = [
-        [H('STT', { rowSpan: 3 }), H('Mã SAP', { rowSpan: 3 }), H('Tên Sản Phẩm', { rowSpan: 3 }), H('ĐVT', { rowSpan: 3 }), H(sys), H('Kiểm Thực Tế'), H('Chênh Lệch'), H('Ghi Chú', { rowSpan: 3 })],
-        [{}, {}, {}, {}, H('(1)'), H('(2)'), H('3 = (2) - (1)'), {}],
-        [{}, {}, {}, {}, H('Số Lượng'), H('Số Lượng'), H('Số Lượng'), {}],
-        [{ text: `Warehouse : ${w.warehouseCode} _ ${whName(w)}`, colSpan: 8, bold: true, decoration: 'underline', fontSize: 8.5, fillColor: GREEN_LIGHT }, {}, {}, {}, {}, {}, {}, {}]
+        [H('STT', { rowSpan: 3 }), ...L(H(pkg ? 'Mã Hàng' : 'Mã SAP', { rowSpan: 3 }), H('Số Lô', { rowSpan: 3 })), H('Tên Sản Phẩm', { rowSpan: 3 }), H('ĐVT', { rowSpan: 3 }), H(sys), H('Kiểm Thực Tế'), H('Chênh Lệch'), H('Ghi Chú', { rowSpan: 3 })],
+        [{}, ...L({}, {}), {}, {}, H('(1)'), H('(2)'), H('3 = (2) - (1)'), {}],
+        [{}, ...L({}, {}), {}, {}, H('Số Lượng'), H('Số Lượng'), H('Số Lượng'), {}],
+        [{ text: `Warehouse : ${w.warehouseCode} _ ${whName(w)}`, colSpan: ncol, bold: true, decoration: 'underline', fontSize: 8.5, fillColor: GREEN_LIGHT }, ...Array.from({ length: ncol - 1 }, () => ({}))]
       ];
       let sq = 0, aq = 0, dq = 0;
       list.forEach((it, i) => {
@@ -86,13 +91,13 @@ const Docs2 = (function () {
         const hl = v != null && Math.abs(v) > 0.0005;
         const note = [it.isExtra ? 'Ngoài sổ sách. ' : '', it.actualQty == null ? 'Chưa kiểm. ' : '', it.note || ''].join('');
         body.push([
-          { text: i + 1, alignment: 'center' }, { text: it.code, alignment: 'center' }, it.name, { text: it.unit || '', alignment: 'center' },
+          { text: i + 1, alignment: 'center' }, ...L({ text: it.code, alignment: 'center' }, { text: it.lot || '', alignment: 'center', fontSize: 7.5 }), it.name, { text: it.unit || '', alignment: 'center' },
           { text: Q(it.sysQty), alignment: 'center' }, { text: Q(it.actualQty), alignment: 'center' },
           { text: v == null ? '' : D(v), alignment: 'center', bold: hl, color: hl ? (v < 0 ? RED : BLUE) : null },
           { text: note, fontSize: 7.5, color: it.actualQty == null ? RED : null }
         ]);
       });
-      body.push([{ text: 'TỔNG', colSpan: 4, bold: true, alignment: 'center', fillColor: GREEN_MID }, {}, {}, {},
+      body.push([{ text: 'TỔNG', colSpan: ncol - 4, bold: true, alignment: 'center', fillColor: GREEN_MID }, ...Array.from({ length: ncol - 5 }, () => ({})),
         { text: Q(sq), bold: true, alignment: 'center', fillColor: GREEN_MID }, { text: Q(aq), bold: true, alignment: 'center', fillColor: GREEN_MID },
         { text: D(Util.round(dq, 3)), bold: true, alignment: 'center', fillColor: GREEN_MID }, { text: '', fillColor: GREEN_MID }]);
 
@@ -103,7 +108,7 @@ const Docs2 = (function () {
         { text: `Ngày Kiểm Kho : ${dmy(s.countDate)}`, bold: true, fontSize: 8.5 },
         { text: `Thời gian bắt đầu : ${hmph(t.start)}   Thời gian kết thúc : ${hmph(t.end)}`, bold: true, fontSize: 8.5, margin: [0, 0, 0, 4] },
         {
-          table: { headerRows: 3, widths: [22, 78, '*', 30, 44, 50, 50, 80], body },
+          table: { headerRows: 3, widths: hasLot ? [20, 50, 52, '*', 30, 46, 46, 46, 62] : [22, 78, '*', 30, 44, 50, 50, 80], body },
           layout: {
             hLineWidth: (i, n) => (i <= 3 || i === n.table.body.length || i === n.table.body.length - 1) ? 0.7 : 0.4,
             vLineWidth: () => 0.5, hLineColor: () => '#555', vLineColor: () => '#555',
@@ -134,6 +139,9 @@ const Docs2 = (function () {
     const groups = [...byWarehouse(s.items)];
     const counted = s.items.filter(i => i.actualQty != null);
     const diff = counted.filter(i => Math.abs(variance(i)) > 0.0005);
+    // File SAP có cột giá trị: tính giá trị chênh lệch theo đơn giá bình quân sổ sách
+    const priced = diff.filter(i => i.sysValue != null && i.sysQty);
+    const diffValue = priced.length ? Math.round(priced.reduce((a, i) => a + variance(i) * i.sysValue / i.sysQty, 0)) : null;
     const acc = counted.length ? Math.round((counted.length - diff.length) / counted.length * 1000) / 10 : 0;
     const content = [];
     const leaves = () => ({ canvas: [
@@ -180,7 +188,7 @@ const Docs2 = (function () {
       card('Số kho đã kiểm', String(groups.length), groups.map(([, l]) => l[0].warehouseCode).join(' · ')),
       card('Mã hàng đã kiểm', `${counted.length}/${s.items.length}`, 'dòng đã đếm / tổng dòng', counted.length === s.items.length ? GREEN : '#e65100'),
       card('Độ chính xác', Util.fmt(acc) + '%', `${counted.length - diff.length} dòng khớp sổ sách`, acc >= 98 ? GREEN : acc >= 95 ? '#e65100' : RED),
-      card('Dòng chênh lệch', String(diff.length), diff.length ? 'xem bảng chi tiết' : 'Không có chênh lệch', diff.length ? RED : GREEN)
+      card('Dòng chênh lệch', String(diff.length), diff.length ? (diffValue != null ? 'Giá trị lệch: ' + Q(diffValue) + ' đ' : 'xem bảng chi tiết') : 'Không có chênh lệch', diff.length ? RED : GREEN)
     ], columnGap: 12 });
     content.push({ margin: [0, 16, 0, 0], table: { headerRows: 1, widths: ['*', 70, 70, 80, 80, 80], body: [
       ['Kho', 'Số dòng', 'Đã kiểm', 'SL sổ sách', 'SL thực tế', 'Chênh lệch'].map(t => ({ text: t, bold: true, color: '#fff', fillColor: GREEN })),
@@ -230,7 +238,18 @@ const Docs2 = (function () {
     const common = [s.checkIn && s.checkIn.data, s.checkOut && s.checkOut.data, ...(s.generalPhotos || []).filter(g => !g.wh).map(g => g.data)].filter(Boolean);
     if (common.length) for (let i = 0; i < common.length; i += 3) photoSlide('Hình ảnh xác nhận có mặt & hiện trường kiểm kê', common.slice(i, i + 3));
 
-    // 5. Thank You
+    // 5. Báo cáo tồn gốc từ chương trình (Package / Ingredient): chèn từng trang PDF đính kèm
+    const src = opts.sourceImages || [];
+    if (src.length) {
+      content.push(...divider('03', 'PROGRAM\nSTOCK\nREPORT'));
+      src.slice(0, 20).forEach((img, i) => {
+        content.push(titleBar(`Báo cáo tồn từ chương trình · ${i + 1}/${src.length}`));
+        content.push({ margin: [0, 60, 0, 0], image: img, fit: [W - 2 * M, H - 120], alignment: 'center' });
+      });
+      if ((opts.sourceNames || []).length) content.push({ text: 'File gốc: ' + opts.sourceNames.join(', '), fontSize: 8, color: MUTED, margin: [0, 4, 0, 0] });
+    }
+
+    // 6. Thank You
     content.push({ text: '', pageBreak: 'before' }, bg(TEAL), leaves(),
       logo ? { canvas: [{ type: 'rect', x: 0, y: 0, w: 230, h: 76, r: 8, color: '#ffffff' }], absolutePosition: { x: 50, y: 50 } } : '',
       logo ? { image: 'logo', fit: [210, 60], absolutePosition: { x: 60, y: 58 } } : '',
@@ -334,7 +353,11 @@ const Docs2 = (function () {
   }
 
   function suppliesExcel(s) {
-    const rows = s.items.map((it, i) => ({ STT: i + 1, 'Kho': it.warehouse, 'Mã SAP': it.code, 'Tên sản phẩm': it.name, 'ĐVT': it.unit, 'SL sổ sách': it.sysQty, 'SL thực tế': it.actualQty, 'Chênh lệch': variance(it), 'Ghi chú': it.note, 'Số ảnh': (it.photos || []).length }));
+    const price = it => it.sysValue != null && it.sysQty ? it.sysValue / it.sysQty : null;
+    const rows = s.items.map((it, i) => Object.assign({ STT: i + 1, 'Kho': it.warehouse, 'Mã': it.code }, it.lot ? { 'Số lô': it.lot } : {}, it.productCode ? { 'Product Code': it.productCode } : {},
+      { 'Tên sản phẩm': it.name, 'ĐVT': it.unit, 'SL sổ sách': it.sysQty, 'SL thực tế': it.actualQty, 'Chênh lệch': variance(it) },
+      price(it) != null ? { 'Giá trị sổ sách': it.sysValue, 'Giá trị chênh lệch': variance(it) == null ? null : Math.round(variance(it) * price(it)) } : {},
+      { 'Ghi chú': it.note, 'Số ảnh': (it.photos || []).length }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'KiemKeVatTu');
     return new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
