@@ -14,6 +14,13 @@ const Docs2 = (function () {
   const docNo = s => `${s.type === 'branch' ? 'KTCN' : s.type === 'package' ? 'BBPK' : 'BBVT'}-${s.factory.code}-${s.countDate.replace(/-/g, '')}`;
   const whName = it => it.warehouseCode ? it.warehouse.replace(new RegExp('^' + it.warehouseCode + '\\s*-\\s*'), '') : it.warehouse;
 
+  // Tên hàng in trên biên bản: tiếng Việt (tự dịch từ tên SAP tiếng Anh), tên gốc in nhỏ bên dưới
+  function nameCell(it) {
+    const v = Glossary.nameVi(it);
+    return v && v !== it.name ? { stack: [{ text: v }, { text: it.name, fontSize: 6.5, color: MUTED }] } : it.name;
+  }
+  const nameText = it => Glossary.nameVi(it) || it.name;
+
   function byWarehouse(items) {
     const map = new Map();
     items.forEach(it => { if (!map.has(it.warehouse)) map.set(it.warehouse, []); map.get(it.warehouse).push(it); });
@@ -91,7 +98,7 @@ const Docs2 = (function () {
         const hl = v != null && Math.abs(v) > 0.0005;
         const note = [it.isExtra ? 'Ngoài sổ sách. ' : '', it.actualQty == null ? 'Chưa kiểm. ' : '', it.note || ''].join('');
         body.push([
-          { text: i + 1, alignment: 'center' }, ...L({ text: it.code, alignment: 'center' }, { text: it.lot || '', alignment: 'center', fontSize: 7.5 }), it.name, { text: it.unit || '', alignment: 'center' },
+          { text: i + 1, alignment: 'center' }, ...L({ text: it.code, alignment: 'center' }, { text: it.lot || '', alignment: 'center', fontSize: 7.5 }), nameCell(it), { text: Glossary.unitVi(it.unit), alignment: 'center' },
           { text: Q(it.sysQty), alignment: 'center' }, { text: Q(it.actualQty), alignment: 'center' },
           { text: v == null ? '' : D(v), alignment: 'center', bold: hl, color: hl ? (v < 0 ? RED : BLUE) : null },
           { text: note, fontSize: 7.5, color: it.actualQty == null ? RED : null }
@@ -205,7 +212,7 @@ const Docs2 = (function () {
       content.push({ text: 'Dòng chênh lệch', bold: true, color: RED, margin: [0, 12, 0, 4] });
       content.push({ table: { headerRows: 1, widths: [70, '*', 40, 60, 60, 60, 140], body: [
         ['Mã', 'Tên', 'ĐVT', 'Sổ sách', 'Thực tế', 'CL', 'Ghi chú'].map(t => ({ text: t, bold: true, color: '#fff', fillColor: RED })),
-        ...diff.slice(0, 12).map(i => [i.code, i.name, i.unit, { text: Q(i.sysQty), alignment: 'right' }, { text: Q(i.actualQty), alignment: 'right' }, { text: D(variance(i)), alignment: 'right', bold: true }, i.note || ''])
+        ...diff.slice(0, 12).map(i => [i.code, nameText(i), i.unit, { text: Q(i.sysQty), alignment: 'right' }, { text: Q(i.actualQty), alignment: 'right' }, { text: D(variance(i)), alignment: 'right', bold: true }, i.note || ''])
       ] }, layout: { hLineWidth: () => 0.5, vLineWidth: () => 0, hLineColor: () => LINE }, fontSize: 8.5 });
     }
 
@@ -238,18 +245,7 @@ const Docs2 = (function () {
     const common = [s.checkIn && s.checkIn.data, s.checkOut && s.checkOut.data, ...(s.generalPhotos || []).filter(g => !g.wh).map(g => g.data)].filter(Boolean);
     if (common.length) for (let i = 0; i < common.length; i += 3) photoSlide('Hình ảnh xác nhận có mặt & hiện trường kiểm kê', common.slice(i, i + 3));
 
-    // 5. Báo cáo tồn gốc từ chương trình (Package / Ingredient): chèn từng trang PDF đính kèm
-    const src = opts.sourceImages || [];
-    if (src.length) {
-      content.push(...divider('03', 'PROGRAM\nSTOCK\nREPORT'));
-      src.slice(0, 20).forEach((img, i) => {
-        content.push(titleBar(`Báo cáo tồn từ chương trình · ${i + 1}/${src.length}`));
-        content.push({ margin: [0, 60, 0, 0], image: img, fit: [W - 2 * M, H - 120], alignment: 'center' });
-      });
-      if ((opts.sourceNames || []).length) content.push({ text: 'File gốc: ' + opts.sourceNames.join(', '), fontSize: 8, color: MUTED, margin: [0, 4, 0, 0] });
-    }
-
-    // 6. Thank You
+    // 5. Thank You
     content.push({ text: '', pageBreak: 'before' }, bg(TEAL), leaves(),
       logo ? { canvas: [{ type: 'rect', x: 0, y: 0, w: 230, h: 76, r: 8, color: '#ffffff' }], absolutePosition: { x: 50, y: 50 } } : '',
       logo ? { image: 'logo', fit: [210, 60], absolutePosition: { x: 60, y: 58 } } : '',
@@ -355,7 +351,7 @@ const Docs2 = (function () {
   function suppliesExcel(s) {
     const price = it => it.sysValue != null && it.sysQty ? it.sysValue / it.sysQty : null;
     const rows = s.items.map((it, i) => Object.assign({ STT: i + 1, 'Kho': it.warehouse, 'Mã': it.code }, it.lot ? { 'Số lô': it.lot } : {}, it.productCode ? { 'Product Code': it.productCode } : {},
-      { 'Tên sản phẩm': it.name, 'ĐVT': it.unit, 'SL sổ sách': it.sysQty, 'SL thực tế': it.actualQty, 'Chênh lệch': variance(it) },
+      { 'Tên sản phẩm': it.name, 'Tên tiếng Việt': Glossary.nameVi(it), 'ĐVT': it.unit, 'SL sổ sách': it.sysQty, 'SL thực tế': it.actualQty, 'Chênh lệch': variance(it) },
       price(it) != null ? { 'Giá trị sổ sách': it.sysValue, 'Giá trị chênh lệch': variance(it) == null ? null : Math.round(variance(it) * price(it)) } : {},
       { 'Ghi chú': it.note, 'Số ảnh': (it.photos || []).length }));
     const wb = XLSX.utils.book_new();

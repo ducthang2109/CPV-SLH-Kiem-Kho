@@ -9,7 +9,7 @@ const Cloud = (function () {
   const API = 'https://api.github.com';
   // Các phần cài đặt dùng chung giữa các máy
   const SHARED = ['companyName', 'allowedDomains', 'systemName', 'factories', 'factoriesVersion', 'masterFile', 'masterAt',
-    'committeeRoles', 'nearExpiryRatio', 'nearExpiryMinDays', 'localUsers', 'msal', 'oneDrive'];
+    'committeeRoles', 'nearExpiryRatio', 'nearExpiryMinDays', 'localUsers', 'msal', 'oneDrive', 'glossary'];
 
   function settings() { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } }
   const enabled = () => { const s = settings(); return !!(s && s.repo && s.token); };
@@ -89,9 +89,11 @@ const Cloud = (function () {
   }
 
   // ----- kết nối -----
-  async function connect(code) {
+  // code: mã kết nối KK1... hoặc token GitHub (khi đó cần repo)
+  async function connect(code, repo) {
     const c = readCode(code);
-    if (!c.repo) throw new Error('Mã kết nối thiếu tên repo dữ liệu');
+    if (!c.repo) c.repo = String(repo || '').trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
+    if (!c.repo) throw new Error('Nhập tên repo dữ liệu, vd ducthang2109/CPV-SLH-Kiem-Kho-Data');
     localStorage.setItem(KEY, JSON.stringify(c));
     try {
       const r = await fetch(`${API}/repos/${c.repo}`, { headers: { Authorization: 'Bearer ' + c.token, Accept: 'application/vnd.github+json' } });
@@ -136,9 +138,11 @@ const Cloud = (function () {
   async function saveHistory(rec) {
     await updateJson(`history/${monthOf(rec.date)}.json`, d => {
       const list = (d && d.records) || [];
+      // Lần kiểm đã bị quản trị viên xóa thì không ghi lại
+      if (d && (d.deleted || []).some(x => x.id === rec.id)) return d;
       const i = list.findIndex(x => x.id === rec.id);
       if (i >= 0) list[i] = Object.assign({}, list[i], rec); else list.push(rec);
-      return { records: list };
+      return Object.assign({}, d || {}, { records: list });
     }, `${who()}: lịch sử ${rec.docNo || rec.id}`);
   }
   async function loadHistory(year) {
@@ -148,6 +152,32 @@ const Cloud = (function () {
     const out = [];
     for (const f of files) { const { data } = await getJson('history/' + f.name); if (data && data.records) out.push(...data.records); }
     return out;
+  }
+
+  // Lịch sử năm: đọc từ dữ liệu chung, lưu bản sao trên máy để xem khi không có mạng
+  async function historyYear(year) {
+    const key = 'kk_cloud_hist_' + year;
+    if (navigator.onLine) {
+      try { const list = await loadHistory(year); localStorage.setItem(key, JSON.stringify({ at: new Date().toISOString(), list })); return { list, at: new Date().toISOString(), live: true }; } catch (e) { console.warn('history', e); }
+    }
+    try { const c = JSON.parse(localStorage.getItem(key) || 'null'); if (c) return { list: c.list, at: c.at, live: false }; } catch (e) { /* bỏ qua */ }
+    return { list: [], at: null, live: false };
+  }
+  function cachedHistory(year) { try { return (JSON.parse(localStorage.getItem('kk_cloud_hist_' + year) || 'null') || {}).list || null; } catch (e) { return null; } }
+
+  async function deleteFile(path, msg) {
+    const sha = await shaOf(path);
+    if (!sha) return;
+    await req('DELETE', path, { message: msg || `${who()}: xóa ${path}`, sha, branch: settings().branch || 'main' });
+  }
+  // Quản trị viên xóa một lần kiểm thừa: bỏ dòng lịch sử và các file của lần kiểm đó
+  async function deleteHistory(rec) {
+    for (const f of rec.files || []) { try { await deleteFile(f.path, `${who()}: xóa ${f.name}`); } catch (e) { console.warn('xóa file', f.path, e); } }
+    await updateJson(`history/${monthOf(rec.date)}.json`, d => ({ records: ((d && d.records) || []).filter(x => x.id !== rec.id), deleted: ((d && d.deleted) || []).concat({ id: rec.id, docNo: rec.docNo, by: who(), at: new Date().toISOString() }) }),
+      `${who()}: xóa lịch sử ${rec.docNo || rec.id}`);
+    const key = 'kk_cloud_hist_' + rec.date.slice(0, 4);
+    const list = cachedHistory(rec.date.slice(0, 4));
+    if (list) localStorage.setItem(key, JSON.stringify({ at: new Date().toISOString(), list: list.filter(x => x.id !== rec.id) }));
   }
 
   // Hàng đợi: id phiên cần gửi lên (gửi khi có mạng)
@@ -170,5 +200,5 @@ const Cloud = (function () {
     return rec;
   }
 
-  return { enabled, settings, makeCode, readCode, connect, disconnect, pullConfig, pushConfig, pushConfigSoon, saveHistory, loadHistory, upload, getBlob, queue, setQueue, enqueue };
+  return { enabled, settings, makeCode, readCode, connect, disconnect, pullConfig, pushConfig, pushConfigSoon, saveHistory, loadHistory, historyYear, cachedHistory, deleteHistory, upload, getBlob, queue, setQueue, enqueue };
 })();

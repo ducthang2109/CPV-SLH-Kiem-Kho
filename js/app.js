@@ -72,8 +72,21 @@
           <input id="email" type="email" placeholder="Email công ty" autocomplete="username">
           <input id="pw" type="password" placeholder="Mật khẩu" autocomplete="current-password">
           <button class="btn ${ms ? '' : 'primary'} block" id="local">Đăng nhập</button>` : ''}
-      </div>`;
+      </div>
+      ${Cloud.enabled() ? `<p class="muted small center">☁ Đã kết nối dữ liệu chung · <a href="#" id="resync">Cập nhật tài khoản</a></p>` : `
+      <div class="card">
+        <h3>☁ Máy mới? Kết nối dữ liệu chung</h3>
+        <p class="small">Nhập <b>mã kết nối</b> quản trị viên gửi riêng cho bạn. App tải về tài khoản, danh sách nhà máy và lịch sử kiểm dùng chung, không phải tạo tài khoản lại.</p>
+        <input id="ccode" placeholder="Mã kết nối (bắt đầu bằng KK1.)" autocomplete="off">
+        <button class="btn block" id="cconnect">Kết nối</button>
+      </div>`}`;
     const ok = () => go('#home');
+    if ($('#cconnect')) $('#cconnect').onclick = () => guard(async () => {
+      const r = await Cloud.connect($('#ccode').value);
+      toast(r.created ? 'Đã kết nối, dữ liệu chung đang trống' : `Đã tải ${r.users} tài khoản, ${r.factories} nhà máy`);
+      renderLogin();
+    }, 'Đang kết nối dữ liệu chung...');
+    if ($('#resync')) $('#resync').onclick = e => { e.preventDefault(); guard(async () => { const r = await Cloud.pullConfig(); toast(`Đã cập nhật ${r.users || 0} tài khoản`); renderLogin(); }, 'Đang tải tài khoản...'); };
     $('#msLogin') && ($('#msLogin').onclick = () => guard(Auth.loginMicrosoft, 'Đang mở trang đăng nhập Microsoft...'));
     $('#create') && ($('#create').onclick = () => guard(async () => {
       await Auth.addLocalUser($('#email').value, $('#name').value, $('#pw').value, true);
@@ -105,10 +118,11 @@
     const user = Auth.currentUser();
     setTitle('CPV SLH Kiem Kho');
     const open = (await DB.all('sessions')).filter(s => s.status !== 'done').sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    const canCount = Auth.can.count();
     view().innerHTML = `
-      <div class="hello">Xin chào <b>${E(user.name)}</b> · ${E(user.email)} · Hôm nay: <b>${Util.vnDate(Util.today())}</b></div>
-      <h3 class="section">Bạn đi kiểm gì?</h3>
-      ${Object.entries(TYPES).map(([k, t], i) => `
+      <div class="hello">Xin chào <b>${E(user.name)}</b> <span class="tag">${E(Auth.ROLES[Auth.role()] || '')}</span> · Hôm nay: <b>${Util.vnDate(Util.today())}</b>${Cloud.enabled() ? ' · ☁ dữ liệu chung' : ''}</div>
+      ${canCount ? '<h3 class="section">Bạn đi kiểm gì?</h3>' : '<p class="muted small">Tài khoản chỉ xem: xem dashboard, lịch sử và file biên bản.</p>'}
+      ${Object.entries(TYPES).filter(() => canCount).map(([k, t], i) => `
         <div class="card type-card click" data-type="${k}">
           <div class="type-no">${i + 1}</div>
           <div><div class="type-name">${t.icon} ${E(t.name)}</div><div class="muted small">${E(t.desc)}</div></div>
@@ -447,6 +461,7 @@
         await DB.put('sessions', s);
         if (p.geo && p.geo.error) toast('Ảnh đã lưu nhưng không có vị trí GPS: ' + p.geo.error, 'err');
         else toast('Đã ghi nhận giờ bắt đầu ' + Stamp.dt(new Date(p.time)));
+        cloudTouch(s);
         renderCount(s.id);
       }, 'Đang lấy vị trí và đóng dấu ảnh...');
     };
@@ -544,7 +559,7 @@
     if (filters.wh && it.warehouse !== filters.wh) return false;
     if (filters.q) {
       const q = filters.q.toLowerCase();
-      if (!(`${it.code} ${it.name} ${it.lot}`.toLowerCase().includes(q))) return false;
+      if (!(`${it.code} ${it.name} ${Glossary.nameVi(it)} ${it.lot}`.toLowerCase().includes(q))) return false;
     }
     const v = Util.variance(it);
     switch (filters.st) {
@@ -638,7 +653,7 @@
     const multi = (it.weighs || []).length > 0;
     return `<div class="card item ${it.actualQty != null ? 'counted' : ''}" data-id="${it.id}">
       <div class="row between"><b>${E(it.code)}</b><span class="tag">${E(it.unit || '')}</span></div>
-      <div class="name">${E(it.name)}${it.isExtra ? ' <span class="tag">ngoài sổ sách</span>' : ''}</div>
+      <div class="name">${Glossary.nameVi(it) ? `<b>${E(Glossary.nameVi(it))}</b><div class="muted small">${E(it.name)}</div>` : E(it.name)}${it.isExtra ? ' <span class="tag">ngoài sổ sách</span>' : ''}</div>
       ${it.lot ? `<div class="meta">Lô <b>${E(it.lot)}</b></div>` : ''}
       <div class="meta">${E(it.warehouse)} · Sổ sách: <b>${F(it.sysQty)}</b> ${E(it.unit || '')}</div>
       <div class="row gap inputs">
@@ -935,7 +950,7 @@
       Viewer.open(await make(), title + ' (bản nháp)');
     }, 'Đang tạo bản xem trước...');
     const qty = isQtyType(typeOf(s));
-    $('#pv1').onclick = () => preview(() => Reports.toBlob(qty ? Docs2.suppliesRecordDoc(s, true) : Reports.inventoryDoc(s, true)), 'Biên bản kiểm kê');
+    $('#pv1').onclick = () => preview(() => qty ? recordWithSource(s, true) : Reports.toBlob(Reports.inventoryDoc(s, true)), 'Biên bản kiểm kê');
     $('#pv2').onclick = () => preview(() => qty ? suppliesReportBlob(s) : tripBlob(s), 'Báo cáo kiểm kê');
     $('#finish').onclick = () => finish(s);
   }
@@ -1101,15 +1116,24 @@
         whImages[wh] = await Promise.race([Viewer.toImages(b), new Promise((_, rj) => setTimeout(() => rj(new Error('timeout')), 30000))]);
       } catch (e) { console.warn('wh images', e); }
     }
-    // Package: chèn các trang báo cáo tồn PDF gốc của chương trình vào báo cáo
-    let sourceImages = [];
-    const src = await sourceFiles(s);
-    for (const f of src) {
-      try { sourceImages = sourceImages.concat(await Promise.race([Viewer.toImages(f.blob), new Promise((_, rj) => setTimeout(() => rj(new Error('timeout')), 30000))])); } catch (e) { console.warn('src images', e); }
-    }
-    return Reports.toBlob(Docs2.suppliesReportDoc(s, { whImages, sourceImages, sourceNames: src.map(f => f.name) }));
+    return Reports.toBlob(Docs2.suppliesReportDoc(s, { whImages }));
   }
   async function sourceFiles(s) { return ((await DB.get('files', 'src:' + s.id)) || {}).files || []; }
+
+  // Biên bản kiểm kê + ghép nguyên các trang PDF tồn kho in từ chương trình vào cuối (Package / Ingredient)
+  async function recordWithSource(s, withSig) {
+    const rec = await Reports.toBlob(Docs2.suppliesRecordDoc(s, withSig));
+    const src = await sourceFiles(s);
+    if (!src.length || typeof PDFLib === 'undefined') return rec;
+    try {
+      const out = await PDFLib.PDFDocument.load(await rec.arrayBuffer());
+      for (const f of src) {
+        const doc = await PDFLib.PDFDocument.load(await f.blob.arrayBuffer(), { ignoreEncryption: true });
+        (await out.copyPages(doc, doc.getPageIndices())).forEach(p => out.addPage(p));
+      }
+      return new Blob([await out.save()], { type: 'application/pdf' });
+    } catch (e) { console.warn('ghép PDF chương trình', e); return rec; }
+  }
 
   async function buildFiles(s) {
     const t = typeOf(s);
@@ -1120,16 +1144,12 @@
         unsigned: { name: n.unsigned, blob: await Reports.toBlob(Docs2.branchRecordDoc(s, false)) },
         excel: { name: n.excel, blob: Docs2.branchExcel(s) }
       };
-      const out = {
+      return {
         trip: { name: n.trip, blob: await suppliesReportBlob(s) },
-        signed: { name: n.signed, blob: await Reports.toBlob(Docs2.suppliesRecordDoc(s, true)) },
-        unsigned: { name: n.unsigned, blob: await Reports.toBlob(Docs2.suppliesRecordDoc(s, false)) },
+        signed: { name: n.signed, blob: await recordWithSource(s, true) },
+        unsigned: { name: n.unsigned, blob: await recordWithSource(s, false) },
         excel: { name: n.excel, blob: Docs2.suppliesExcel(s) }
       };
-      // Báo cáo tồn PDF gốc từ chương trình đính kèm theo biên bản
-      const src = await sourceFiles(s);
-      if (src.length) out.source = { name: `${Docs2.docNo(s)}_TonChuongTrinh_${Util.safeName(src[0].name.replace(/\.pdf$/i, ''))}.pdf`, blob: src[0].blob };
-      return out;
     }
     const n = Reports.fileNames(s);
     const signed = await Reports.toBlob(Reports.inventoryDoc(s, true));
@@ -1411,12 +1431,43 @@
 
   async function renderDashboard() {
     setTitle('Dashboard kiểm kho', '#home');
-    const own = (await DB.all('sessions')).map(summaryOf);
-    const ids = new Set(own.map(h => h.id));
-    const all = own.concat(externalHistory().filter(h => !ids.has(h.id))).sort((a, b) => b.date.localeCompare(a.date) || String(b.start).localeCompare(String(a.start)));
-    const years = [...new Set(all.map(h => h.date.slice(0, 4)))].sort().reverse();
-    const st = renderDashboard.state = renderDashboard.state || { year: years[0] || String(new Date().getFullYear()), month: '', type: '', user: '' };
-    if (!years.includes(st.year)) years.unshift(st.year);
+    const st = renderDashboard.state = renderDashboard.state || { year: String(new Date().getFullYear()), month: String(new Date().getMonth() + 1).padStart(2, '0'), type: '', user: '', view: 'month' };
+    const own = (await DB.all('sessions')).filter(s => s.checkIn || s.status === 'done').map(summaryOf);
+    // Lịch sử chung: hiện ngay bản đã lưu trên máy, rồi tải bản mới nhất
+    const cloudList = Cloud.enabled() ? (Cloud.cachedHistory(st.year) || []) : [];
+    drawDashboard(own, cloudList, Cloud.enabled() ? 'loading' : 'off');
+    if (Cloud.enabled()) {
+      const r = await Cloud.historyYear(st.year);
+      if (location.hash.startsWith('#dashboard')) drawDashboard(own, r.list, r.live ? 'live' : 'offline', r.at);
+    }
+  }
+
+  function mergeHistory(own, cloudList) {
+    const map = new Map();
+    cloudList.forEach(h => map.set(h.id, Object.assign({}, h, { cloud: true })));
+    own.forEach(h => {
+      const c = map.get(h.id);
+      // Trên máy này còn phiên kiểm: mở thẳng được; trạng thái lấy bản mới hơn
+      map.set(h.id, Object.assign({}, c || {}, h, { cloud: !!c, files: (c && c.files) || [], local: true }));
+    });
+    externalHistory().forEach(h => { if (!map.has(h.id)) map.set(h.id, Object.assign({}, h, { local: false })); });
+    return [...map.values()].filter(h => h.date && TYPES[h.type]);
+  }
+
+  const hm = ts => ts ? new Date(ts).toTimeString().slice(0, 5) : '';
+  const dur = (a, b) => {
+    if (!a || !b) return '';
+    const m = Math.round((new Date(b) - new Date(a)) / 60000);
+    return m <= 0 ? '' : m < 60 ? `${m} phút` : `${Math.floor(m / 60)} giờ ${String(m % 60).padStart(2, '0')}`;
+  };
+  const initials = n => String(n || '?').trim().split(/\s+/).slice(-2).map(w => w[0]).join('').toUpperCase();
+  const DOW = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+  function drawDashboard(own, cloudList, cloudState, cloudAt) {
+    const st = renderDashboard.state;
+    const all = mergeHistory(own, cloudList).sort((a, b) => b.date.localeCompare(a.date) || String(b.start).localeCompare(String(a.start)));
+    const thisYear = String(new Date().getFullYear());
+    const years = [...new Set(all.map(h => h.date.slice(0, 4)).concat(thisYear, st.year))].sort().reverse();
     const users = [...new Set(all.map(h => h.user))].sort();
     const inYear = all.filter(h => h.date.startsWith(st.year) && (!st.type || h.type === st.type) && (!st.user || h.user === st.user));
     const list = inYear.filter(h => !st.month || h.date.slice(5, 7) === st.month);
@@ -1429,69 +1480,158 @@
     });
     const max = Math.max(1, ...byMonth.map(b => b.n));
     const done = list.filter(h => h.status === 'done');
-    const diffLines = list.reduce((a, h) => a + (h.stats.diff || 0) + (h.stats.fail || 0), 0);
-    const byUser = new Map();
-    list.forEach(h => { if (!byUser.has(h.user)) byUser.set(h.user, []); byUser.get(h.user).push(h); });
-    const COLORS = TYPE_COLORS;
+    const issues = list.reduce((a, h) => a + ((h.stats || {}).diff || 0) + ((h.stats || {}).fail || 0), 0);
+    const people = [...new Set(list.map(h => h.user))];
+    const admin = Auth.can.deleteHistory();
+    const C = TYPE_COLORS;
+    const short = k => ({ branch: 'Chi nhánh', meat: 'Meat', supplies: 'Spare part / Supplies', package: 'Package / Ingredient' })[k];
+    const periodLabel = st.month ? `Tháng ${Number(st.month)}/${st.year}` : `Năm ${st.year}`;
+
+    // Lịch đi kiểm theo kế toán: hàng = kế toán, cột = ngày trong tháng (hoặc tháng trong năm)
+    const lanes = (st.user ? [st.user] : [...new Set(inYear.map(h => h.user))].sort());
+    let grid = '';
+    if (st.month) {
+      const days = new Date(Number(st.year), Number(st.month), 0).getDate();
+      const today = Util.today();
+      const head = Array.from({ length: days }, (_, i) => {
+        const d = new Date(Number(st.year), Number(st.month) - 1, i + 1);
+        return `<div class="gh ${d.getDay() === 0 ? 'sun' : ''}">${i + 1}<i>${DOW[d.getDay()]}</i></div>`;
+      }).join('');
+      grid = `<div class="lane-grid" style="--cols:${days}">
+        <div class="lane-name lane-head"></div><div class="lane-cells">${head}</div>
+        ${lanes.map(u => `<div class="lane-name"><span class="ava">${E(initials(u))}</span><span>${E(u)}</span></div><div class="lane-cells">${Array.from({ length: days }, (_, i) => {
+          const iso = `${st.year}-${st.month}-${String(i + 1).padStart(2, '0')}`;
+          const hs = list.filter(h => h.user === u && h.date === iso);
+          const dow = new Date(Number(st.year), Number(st.month) - 1, i + 1).getDay();
+          return `<div class="gc ${dow === 0 ? 'sun' : ''} ${iso === today ? 'today' : ''}" ${hs.length ? `data-day="${iso}" title="${E(hs.map(h => short(h.type) + ' · ' + h.factory).join('\n'))}"` : ''}>${hs.length ? `<span class="dot" style="background:${C[hs[0].type]}">${hs.length > 1 ? hs.length : ''}</span>` : ''}</div>`;
+        }).join('')}</div>`).join('') || '<p class="muted small">Chưa có lần kiểm nào.</p>'}
+      </div>`;
+    } else {
+      const maxCell = Math.max(1, ...lanes.map(u => Math.max(...byMonth.map(b => inYear.filter(h => h.user === u && h.date.slice(5, 7) === b.mm).length))));
+      grid = `<div class="lane-grid" style="--cols:12">
+        <div class="lane-name lane-head"></div><div class="lane-cells">${byMonth.map(b => `<div class="gh">T${Number(b.mm)}</div>`).join('')}</div>
+        ${lanes.map(u => `<div class="lane-name"><span class="ava">${E(initials(u))}</span><span>${E(u)}</span></div><div class="lane-cells">${byMonth.map(b => {
+          const n = inYear.filter(h => h.user === u && h.date.slice(5, 7) === b.mm).length;
+          return `<div class="gc heat" data-m="${b.mm}" style="--a:${n ? 0.18 + 0.82 * n / maxCell : 0}">${n || ''}</div>`;
+        }).join('')}</div>`).join('') || '<p class="muted small">Chưa có lần kiểm nào.</p>'}
+      </div>`;
+    }
+
+    // Dòng thời gian: nhóm theo ngày, mới nhất trước
+    const byDay = new Map();
+    list.forEach(h => { if (!byDay.has(h.date)) byDay.set(h.date, []); byDay.get(h.date).push(h); });
+    const feed = [...byDay].map(([d, hs]) => {
+      const dt = new Date(d + 'T00:00:00');
+      return `<div class="day-head"><b>${DOW[dt.getDay()]}, ${Util.vnDate(d)}</b><span>${hs.length} lần kiểm</span></div>
+        ${hs.map(h => {
+          const s = h.stats || {};
+          const res = h.type === 'branch'
+            ? `<span class="pill ${s.fail ? 'bad' : 'good'}">${s.pass || 0} đạt · ${s.fail || 0} không đạt</span>`
+            : `<span class="pill ${s.diff ? 'bad' : s.counted ? 'good' : ''}">${s.counted || 0}/${s.lines || 0} dòng · ${s.diff ? s.diff + ' lệch' : s.counted ? 'khớp sổ' : 'chưa đếm'}</span>`;
+          const files = (h.files || []).filter(f => /\.pdf$/i.test(f.name));
+          return `<div class="ev" style="--c:${C[h.type]}">
+            <div class="ev-time"><b>${hm(h.start)}</b><span>${hm(h.end)}</span></div>
+            <div class="ev-body">
+              <div class="ev-top"><span class="tchip" style="--c:${C[h.type]}">${TYPES[h.type].icon} ${short(h.type)}</span><span class="pill ${h.status === 'done' ? 'done' : 'run'}">${h.status === 'done' ? 'Hoàn tất' : 'Đang kiểm'}</span></div>
+              <div class="ev-title">${E(h.factory)}</div>
+              <div class="ev-meta"><span class="ava sm">${E(initials(h.user))}</span>${E(h.user)}${dur(h.start, h.end) ? ` · ⏱ ${dur(h.start, h.end)}` : ''}${h.docNo ? ` · ${E(h.docNo)}` : ''}</div>
+              <div class="ev-meta">${res}${h.cloud ? ' <span class="pill cloud">☁</span>' : h.local === false ? ' <span class="pill">nhập từ máy khác</span>' : ''}</div>
+              <div class="ev-act">
+                ${h.local ? `<button class="btn small-btn" data-open="${h.id}" data-st="${h.status}">${h.status === 'done' ? 'Mở kết quả' : 'Tiếp tục'}</button>` : ''}
+                ${!h.local ? files.map(f => `<button class="btn small-btn" data-cf="${E(f.path)}" data-cn="${E(f.name)}">📄 ${E(FILE_LABELS[f.key] || f.name)}</button>`).join('') : ''}
+                ${admin && (h.cloud || h.local) ? `<button class="btn small-btn danger" data-del="${h.id}">🗑 Xóa</button>` : ''}
+              </div>
+            </div>
+          </div>`;
+        }).join('')}`;
+    }).join('');
+
     view().innerHTML = `
-      <div class="card">
-        <div class="row gap">
-          <select id="dy">${years.map(y => `<option ${y === st.year ? 'selected' : ''}>${y}</option>`).join('')}</select>
-          <select id="dm"><option value="">Cả năm</option>${byMonth.map(b => `<option value="${b.mm}" ${b.mm === st.month ? 'selected' : ''}>Tháng ${Number(b.mm)}</option>`).join('')}</select>
+      <div class="dash-hero">
+        <div class="row between">
+          <div><div class="hero-sub">Tình trạng kiểm kho</div><div class="hero-title">${periodLabel}</div></div>
+          <select id="dy" class="hero-sel">${years.map(y => `<option ${y === st.year ? 'selected' : ''}>${y}</option>`).join('')}</select>
         </div>
-        <div class="row gap">
-          <select id="dt"><option value="">Tất cả loại kiểm</option>${Object.entries(TYPES).map(([k, t]) => `<option value="${k}" ${k === st.type ? 'selected' : ''}>${E(t.name)}</option>`).join('')}</select>
-          <select id="du"><option value="">Tất cả kế toán</option>${users.map(u => `<option ${u === st.user ? 'selected' : ''}>${E(u)}</option>`).join('')}</select>
+        <div class="kpis">
+          <div><b>${list.length}</b><span>lần kiểm</span></div>
+          <div><b>${done.length}</b><span>hoàn tất</span></div>
+          <div><b>${new Set(list.map(h => h.factoryCode)).size}</b><span>nhà máy</span></div>
+          <div><b>${people.length}</b><span>kế toán</span></div>
+          <div class="${issues ? 'warn' : ''}"><b>${issues}</b><span>lệch / KĐ</span></div>
         </div>
+        <div class="sync-line">${cloudState === 'off' ? '📱 Chỉ dữ liệu trên máy này' : cloudState === 'loading' ? '☁ Đang tải lịch sử chung...' : cloudState === 'live' ? '☁ Lịch sử chung của mọi kế toán · vừa cập nhật' : `☁ Đang offline · bản lưu lúc ${cloudAt ? Util.vnDateTime(cloudAt) : '—'}`}</div>
       </div>
-      <div class="stats">
-        <div><b>${list.length}</b><span>lần kiểm</span></div>
-        <div><b>${done.length}</b><span>đã hoàn tất</span></div>
-        <div><b>${new Set(list.map(h => h.factoryCode)).size}</b><span>nhà máy</span></div>
-        <div class="${diffLines ? 'bad' : ''}"><b>${diffLines}</b><span>dòng lệch / KĐ</span></div>
+
+      <div class="chips">
+        <button class="chip ${!st.type ? 'on' : ''}" data-t="">Tất cả</button>
+        ${Object.keys(TYPES).map(k => `<button class="chip ${st.type === k ? 'on' : ''}" data-t="${k}"><i style="background:${C[k]}"></i>${short(k)}</button>`).join('')}
       </div>
+      <div class="row gap">
+        <select id="du"><option value="">Tất cả kế toán</option>${users.map(u => `<option ${u === st.user ? 'selected' : ''}>${E(u)}</option>`).join('')}</select>
+      </div>
+
       <div class="card">
-        <h3>Số lần kiểm theo tháng · ${E(st.year)}</h3>
+        <div class="row between"><h3>Số lần kiểm theo tháng</h3>${st.month ? '<button class="btn small-btn" id="allyear">Xem cả năm</button>' : ''}</div>
         <div class="mchart">${byMonth.map(b => `
           <div class="mcol ${b.mm === st.month ? 'sel' : ''}" data-m="${b.mm}" title="Tháng ${Number(b.mm)}: ${b.n} lần">
-            <div class="mbar" style="height:${b.n / max * 100}%">${['package', 'supplies', 'meat', 'branch'].map(k => b.t[k] ? `<div style="flex:${b.t[k]};background:${COLORS[k]}"></div>` : '').join('')}</div>
-            <div class="mval">${b.n || ''}</div><div class="mlab">T${Number(b.mm)}</div>
+            <div class="mval">${b.n || ''}</div>
+            <div class="mbar" style="height:${b.n / max * 100}%">${['package', 'supplies', 'meat', 'branch'].map(k => b.t[k] ? `<div style="flex:${b.t[k]};background:${C[k]}"></div>` : '').join('')}</div>
+            <div class="mlab">T${Number(b.mm)}</div>
           </div>`).join('')}
         </div>
-        <div class="legend small">${Object.entries(TYPES).map(([k, t]) => `<span><i style="background:${COLORS[k]}"></i>${E(t.name.replace('Kiểm kê kho ', ''))}</span>`).join('')}</div>
+        <p class="muted small">Bấm vào cột để xem chi tiết tháng.</p>
       </div>
+
       <div class="card">
-        <h3>Timeline theo kế toán${st.month ? ' · tháng ' + Number(st.month) : ''}</h3>
-        ${[...byUser].map(([u, hs]) => `
-          <div class="tl-user"><b>${E(u)}</b> <span class="muted small">${hs.length} lần</span></div>
-          <div class="timeline">${hs.slice().sort((a, b) => a.date.localeCompare(b.date)).map(h => `
-            <div class="tl-item ${h.local ? 'click' : ''}" ${h.local ? `data-id="${h.id}" data-st="${h.status}"` : ''}>
-              <span class="tl-dot" style="background:${COLORS[h.type]}"></span>
-              <div><b>${Util.vnDate(h.date)}</b> · ${E(h.factory)}<div class="muted small">${E(TYPES[h.type].name)} · ${h.start ? new Date(h.start).toTimeString().slice(0, 5) : ''}${h.end ? '–' + new Date(h.end).toTimeString().slice(0, 5) : ''} · ${h.status === 'done' ? 'Hoàn tất' : 'Đang làm'}${h.type === 'branch' ? ` · ${h.stats.fail || 0} KĐ` : ` · ${h.stats.diff || 0} dòng lệch`}${h.local ? '' : ' · (nhập từ máy khác)'}</div></div>
-            </div>`).join('')}</div>`).join('') || '<p class="muted">Không có lần kiểm nào trong khoảng này.</p>'}
+        <h3>Lịch đi kiểm theo kế toán · ${periodLabel}</h3>
+        <div class="lane-wrap">${grid}</div>
+        <div class="legend small">${Object.keys(TYPES).map(k => `<span><i style="background:${C[k]}"></i>${short(k)}</span>`).join('')}</div>
       </div>
+
+      <h3 class="section">Dòng thời gian · ${periodLabel}</h3>
+      <div class="feed">${feed || '<div class="card muted">Không có lần kiểm nào trong khoảng này.</div>'}</div>
+
       <div class="card">
-        <h3>Lịch sử chung nhiều kế toán</h3>
-        <p class="muted small">Mỗi máy lưu lịch sử riêng. Để xem chung: mỗi người bấm "Xuất lịch sử" rồi gửi file qua OneDrive/Zalo, người tổng hợp bấm "Nhập lịch sử".</p>
+        <h3>Xuất dữ liệu</h3>
         <div class="row gap">
-          <button class="btn small-btn" id="hx">⬇ Xuất lịch sử (.json)</button>
-          <label class="btn small-btn">⬆ Nhập lịch sử<input type="file" id="hi" accept=".json,application/json" hidden multiple></label>
-          <button class="btn small-btn" id="hxl">⬇ Excel lịch sử</button>
+          <button class="btn small-btn" id="hxl">⬇ Excel lịch sử ${E(periodLabel.toLowerCase())}</button>
+          ${Cloud.enabled() ? '' : `<button class="btn small-btn" id="hx">⬇ Xuất lịch sử (.json)</button>
+          <label class="btn small-btn">⬆ Nhập lịch sử<input type="file" id="hi" accept=".json,application/json" hidden multiple></label>`}
         </div>
+        ${Cloud.enabled() ? '' : '<p class="muted small">Chưa bật dữ liệu chung: mỗi máy lưu lịch sử riêng. Quản trị viên bật trong ⚙ Cài đặt để mọi kế toán dùng chung.</p>'}
       </div>`;
-    const upd = (k, v) => { st[k] = v; renderDashboard(); };
+
+    // Lịch theo ngày: cuộn tới hôm nay (hoặc ngày kiểm gần nhất)
+    const focus = $('.gc.today') || $$('.gc[data-day]').pop();
+    if (focus) $('.lane-wrap').scrollLeft = Math.max(0, focus.offsetLeft - 200);
+    const upd = (k, v) => { st[k] = v; if (k === 'year') { st.month = ''; return renderDashboard(); } drawDashboard(own, cloudList, cloudState, cloudAt); };
     $('#dy').onchange = e => upd('year', e.target.value);
-    $('#dm').onchange = e => upd('month', e.target.value);
-    $('#dt').onchange = e => upd('type', e.target.value);
     $('#du').onchange = e => upd('user', e.target.value);
+    $$('.chip').forEach(c => c.onclick = () => upd('type', c.dataset.t));
     $$('.mcol').forEach(c => c.onclick = () => upd('month', st.month === c.dataset.m ? '' : c.dataset.m));
-    $$('.tl-item[data-id]').forEach(el => el.onclick = () => go((el.dataset.st === 'done' ? '#done/' : '#count/') + el.dataset.id));
+    $$('.gc.heat[data-m]').forEach(c => c.onclick = () => upd('month', c.dataset.m));
+    if ($('#allyear')) $('#allyear').onclick = () => upd('month', '');
+    $$('.gc[data-day]').forEach(c => c.onclick = () => {
+      const el = $$('.day-head').find(x => x.textContent.includes(Util.vnDate(c.dataset.day)));
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    $$('[data-open]').forEach(b => b.onclick = () => go((b.dataset.st === 'done' ? '#done/' : '#count/') + b.dataset.open));
+    $$('[data-cf]').forEach(b => b.onclick = () => guard(async () => Viewer.open(await Cloud.getBlob(b.dataset.cf), b.dataset.cn), 'Đang tải file...'));
+    $$('[data-del]').forEach(b => b.onclick = () => {
+      const h = all.find(x => x.id === b.dataset.del);
+      if (!h || !confirm(`Xóa lần kiểm ${h.docNo || ''} · ${h.factory} · ${Util.vnDate(h.date)} của ${h.user}?\nLịch sử và các file biên bản của lần này sẽ bị xóa khỏi dữ liệu chung${h.local ? ' và khỏi máy này' : ''}. Không khôi phục được.`)) return;
+      guard(async () => {
+        if (h.cloud) await Cloud.deleteHistory(h);
+        if (h.local) { await DB.del('sessions', h.id); await DB.del('files', h.id); await DB.del('files', 'src:' + h.id).catch(() => {}); Cloud.setQueue(Cloud.queue().filter(x => x !== h.id)); }
+        toast('Đã xóa lần kiểm'); renderDashboard();
+      }, 'Đang xóa...');
+    });
     const user = Auth.currentUser();
-    $('#hx').onclick = () => {
+    if ($('#hx')) $('#hx').onclick = () => {
       const blob = new Blob([JSON.stringify({ app: 'CPV SLH Kiem Kho', exportedBy: user.name, at: new Date().toISOString(), history: own.map(h => Object.assign({}, h, { local: false })) }, null, 1)], { type: 'application/json' });
       Util.download(blob, `LichSuKiemKho_${Util.safeName(user.name)}_${Util.today()}.json`);
     };
-    $('#hi').onchange = async e => {
+    if ($('#hi')) $('#hi').onchange = async e => {
       let n = 0;
       const ext = externalHistory();
       for (const f of e.target.files) {
@@ -1504,12 +1644,13 @@
       toast(`Đã nhập ${n} lần kiểm`); renderDashboard();
     };
     $('#hxl').onclick = () => {
-      const rows = all.map(h => ({ 'Ngày': Util.vnDate(h.date), 'Loại kiểm': TYPES[h.type].name, 'Nhà máy': h.factory, 'Mã NM': h.factoryCode, 'Kế toán': h.user,
-        'Bắt đầu': h.start ? Util.vnDateTime(h.start) : '', 'Kết thúc': h.end ? Util.vnDateTime(h.end) : '', 'Trạng thái': h.status === 'done' ? 'Hoàn tất' : 'Đang làm',
-        'Số dòng / chỉ tiêu': h.stats.lines || h.stats.total || '', 'Dòng lệch': h.stats.diff == null ? '' : h.stats.diff, 'Không đạt': h.stats.fail == null ? '' : h.stats.fail }));
+      const rows = list.map(h => ({ 'Ngày': Util.vnDate(h.date), 'Loại kiểm': TYPES[h.type].name, 'Nhà máy': h.factory, 'Mã NM': h.factoryCode, 'Số biên bản': h.docNo || '', 'Kế toán': h.user,
+        'Bắt đầu': h.start ? Util.vnDateTime(h.start) : '', 'Kết thúc': h.end ? Util.vnDateTime(h.end) : '', 'Thời gian': dur(h.start, h.end), 'Trạng thái': h.status === 'done' ? 'Hoàn tất' : 'Đang kiểm',
+        'Số dòng / chỉ tiêu': (h.stats || {}).lines || (h.stats || {}).total || '', 'Dòng lệch': (h.stats || {}).diff == null ? '' : h.stats.diff, 'Không đạt': (h.stats || {}).fail == null ? '' : h.stats.fail,
+        'File': (h.files || []).map(f => f.name).join(', ') }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'LichSu');
-      Util.download(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `LichSuKiemKho_${Util.today()}.xlsx`);
+      Util.download(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `LichSuKiemKho_${Util.safeName(periodLabel)}.xlsx`);
     };
   }
 
@@ -1518,9 +1659,18 @@
     const user = Auth.currentUser();
     setTitle('Cài đặt', user ? '#home' : '#login');
     const c = Config.get();
-    const canEdit = !user || user.provider === 'microsoft' || user.admin || !c.localUsers.length;
-    if (!canEdit) { view().innerHTML = '<div class="card">Chỉ tài khoản quản trị được sửa cài đặt.</div>'; return; }
+    const canEdit = user ? Auth.can.settings() : !c.localUsers.length;
+    if (!canEdit) {
+      view().innerHTML = `${cloudCard(false)}
+        <div class="card small">Tài khoản <b>${E(user ? user.name : '')}</b> · quyền <b>${E(Auth.ROLES[Auth.role()] || '')}</b>. Chỉ quản trị viên được sửa cài đặt, nhà máy và tài khoản.</div>
+        ${user ? '<button class="btn block" id="logout">Đăng xuất</button>' : ''}
+        <p class="muted small center">Phiên bản ${window.APP_VERSION}</p>`;
+      bindCloudCard(false);
+      if ($('#logout')) $('#logout').onclick = () => { Auth.logout(); current = null; go('#login'); };
+      return;
+    }
     view().innerHTML = `
+      ${cloudCard(true)}
       <div class="card">
         <h3>Công ty</h3>
         <label>Tên công ty<input id="cn" value="${E(c.companyName)}"></label>
@@ -1576,13 +1726,26 @@
         <textarea id="roles" rows="6">${E(c.committeeRoles.map(r => [r.role, r.title, r.name].join(' | ')).join('\n'))}</textarea>
         <p class="muted small">Mỗi dòng: Chức danh | Ghi thêm | Họ tên</p>
       </div>
+      <div class="card">
+        <h3>Từ điển dịch tên vật tư (tiếng Anh → tiếng Việt)</h3>
+        <p class="muted small">App tự dịch tên SAP tiếng Anh để in biên bản tiếng Việt, vd "Proximity Sensor" → "Cảm biến tiệm cận". Thêm hoặc sửa cách dịch ở đây, mỗi dòng: <code>tiếng Anh = tiếng Việt</code>. Dòng ở đây được ưu tiên hơn từ điển có sẵn và dùng chung cho mọi máy.</p>
+        <textarea id="gloss" rows="5" placeholder="Bearing = Vòng bi&#10;Overload = Rơ le nhiệt">${E(c.glossary || '')}</textarea>
+        <label class="small">Thử dịch<input id="gtest" placeholder="Gõ tên tiếng Anh, vd Omron Proximity Sensor E2E-X5Y1"></label>
+        <p class="small" id="gout"></p>
+      </div>
       <button class="btn primary block" id="save">Lưu cài đặt</button>
       <div class="card">
-        <h3>Tài khoản nội bộ</h3>
-        ${c.localUsers.map(u => `<div class="row between li"><span>${E(u.name)} · ${E(u.email)}${u.admin ? ' · quản trị' : ''}</span><button class="btn small-btn" data-rmu="${E(u.email)}">Xóa</button></div>`).join('') || '<p class="muted small">Chưa có</p>'}
+        <h3>Tài khoản & phân quyền</h3>
+        <p class="muted small"><b>Quản trị</b>: sửa cài đặt, nhà máy, tài khoản, xóa lịch sử kiểm thừa · <b>Kế toán</b>: đi kiểm, xem dashboard · <b>Chỉ xem</b>: xem dashboard và file biên bản.${Cloud.enabled() ? ' Tài khoản dùng chung cho mọi máy đã kết nối.' : ''}</p>
+        ${c.localUsers.map(u => `<div class="urow">
+          <div><b>${E(u.name)}</b><div class="muted small">${E(u.email)}</div></div>
+          <select data-role="${E(u.email)}">${Object.entries(Auth.ROLES).map(([k, t]) => `<option value="${k}" ${Auth.roleOf(u) === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          <button class="btn small-btn" data-rmu="${E(u.email)}" ${user && user.email === u.email ? 'disabled title="Không tự xóa tài khoản đang dùng"' : ''}>Xóa</button>
+        </div>`).join('') || '<p class="muted small">Chưa có</p>'}
+        <h4>Thêm tài khoản</h4>
         <input id="ue" type="email" placeholder="Email"><input id="un" placeholder="Họ tên"><input id="up" type="password" placeholder="Mật khẩu">
-        <label class="row gap small"><input type="checkbox" id="ua" style="width:auto"> Quản trị</label>
-        <button class="btn small-btn" id="addu">Thêm tài khoản</button>
+        <select id="ua">${Object.entries(Auth.ROLES).map(([k, t]) => `<option value="${k}" ${k === 'accountant' ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <button class="btn small-btn primary" id="addu">Thêm tài khoản</button>
       </div>
       ${user ? '<button class="btn block" id="logout">Đăng xuất</button>' : ''}
       <p class="muted small center">Phiên bản ${window.APP_VERSION}</p>`;
@@ -1644,7 +1807,9 @@
       }
     };
     $('#save').onclick = () => {
-      const factories = $$('#facs .fac').map(r => ({
+      // Giữ các thông tin khác của nhà máy lấy từ file Master (file vật tư, bao bì, người ký...)
+      const old = new Map(c.factories.map(f => [f.code, f]));
+      const factories = $$('#facs .fac').map(r => Object.assign({}, old.get($('.fc', r).value.trim()) || {}, {
         code: $('.fc', r).value.trim(), name: $('.fn', r).value.trim(), address: $('.fa', r).value.trim(), inputFile: $('.ff', r).value.trim(),
         ...parseLatLng($('.fg', r).value)
       })).filter(f => f.code && f.name);
@@ -1658,17 +1823,75 @@
         oneDrive: { inputFolder: $('#inf').value.trim(), outputFolder: $('#outf').value.trim() },
         factories, committeeRoles, factoriesVersion: window.APP_DEFAULT_CONFIG.factoriesVersion,
         nearExpiryRatio: Number($('#ratio').value) / 100 || 0.25,
-        nearExpiryMinDays: Number($('#mind').value) || 0
+        nearExpiryMinDays: Number($('#mind').value) || 0,
+        glossary: $('#gloss').value.trim()
       });
       toast('Đã lưu. App sẽ tải lại.');
-      setTimeout(() => location.reload(), 800);
+      setTimeout(() => location.reload(), 1500);
+    };
+    $('#gtest').oninput = () => {
+      const keep = Config.get().glossary;
+      // Thử ngay với từ điển đang gõ (chưa lưu)
+      Config.get().glossary = $('#gloss').value;
+      $('#gout').textContent = $('#gtest').value ? '→ ' + (Glossary.vi($('#gtest').value) || '(chưa có trong từ điển)') : '';
+      Config.get().glossary = keep;
     };
     $('#addu').onclick = () => guard(async () => {
-      await Auth.addLocalUser($('#ue').value, $('#un').value, $('#up').value, $('#ua').checked);
+      await Auth.addLocalUser($('#ue').value, $('#un').value, $('#up').value, $('#ua').value);
       toast('Đã thêm tài khoản'); renderSettings();
+    });
+    $$('[data-role]').forEach(s => s.onchange = () => {
+      try { Auth.setRole(s.dataset.role, s.value); toast('Đã đổi quyền ' + s.dataset.role); } catch (e) { toast(e.message, 'err'); }
+      Auth.refreshUser(); renderSettings();
     });
     $$('[data-rmu]').forEach(b => b.onclick = () => { if (confirm('Xóa tài khoản ' + b.dataset.rmu + '?')) { Auth.removeLocalUser(b.dataset.rmu); renderSettings(); } });
     if ($('#logout')) $('#logout').onclick = () => { Auth.logout(); current = null; go('#login'); };
+    bindCloudCard(true);
+  }
+
+  // ---------- thẻ dữ liệu chung trong Cài đặt ----------
+  const DATA_REPO = 'ducthang2109/CPV-SLH-Kiem-Kho-Data';
+  function cloudCard(admin) {
+    if (!Cloud.enabled()) return `
+      <div class="card cloud-card">
+        <h3>☁ Dữ liệu chung (lịch sử, file, tài khoản)</h3>
+        <p class="small">Chưa kết nối: lịch sử và file chỉ nằm trên máy này. ${admin ? 'Nhập token GitHub của repo dữ liệu riêng tư (xem hướng dẫn) hoặc mã kết nối KK1.' : 'Nhập mã kết nối quản trị viên gửi cho bạn.'}</p>
+        ${admin ? `<label class="small">Repo dữ liệu (Private)<input id="crepo" value="${E(DATA_REPO)}"></label>` : ''}
+        <input id="ccode" placeholder="${admin ? 'Token GitHub (github_pat_...) hoặc mã kết nối KK1...' : 'Mã kết nối KK1...'}" autocomplete="off">
+        <button class="btn primary block" id="cconnect">Kết nối</button>
+      </div>`;
+    const st = Cloud.settings();
+    const q = Cloud.queue().length;
+    return `
+      <div class="card cloud-card ok-card">
+        <h3>☁ Dữ liệu chung đã kết nối</h3>
+        <p class="small">Repo riêng tư <b>${E(st.repo)}</b> · lần đồng bộ gần nhất ${localStorage.getItem('kk_cloud_pulled') ? Util.vnDateTime(localStorage.getItem('kk_cloud_pulled')) : 'chưa có'}${q ? ` · <b class="short">${q} lần kiểm chờ gửi</b>` : ''}</p>
+        <div class="row gap">
+          <button class="btn small-btn primary" id="csync">⟳ Đồng bộ ngay</button>
+          ${admin ? '<button class="btn small-btn" id="ccopy">🔑 Lấy mã kết nối cho máy khác</button>' : ''}
+          <button class="btn small-btn" id="coff">Ngắt kết nối máy này</button>
+        </div>
+        <div id="ccodebox"></div>
+      </div>`;
+  }
+  function bindCloudCard(admin) {
+    if ($('#cconnect')) $('#cconnect').onclick = () => guard(async () => {
+      const r = await Cloud.connect($('#ccode').value, $('#crepo') ? $('#crepo').value : '');
+      // Lần đầu: đưa lịch sử các lần kiểm đã có trên máy này lên dữ liệu chung
+      (await DB.all('sessions')).filter(s => s.checkIn).forEach(s => Cloud.enqueue(s.id));
+      Auth.refreshUser();
+      toast(r.created ? 'Đã kết nối. Dữ liệu chung mới tạo từ cài đặt của máy này' : `Đã kết nối: ${r.users} tài khoản, ${r.factories} nhà máy`);
+      flushCloud().then(x => x.sent && toast(`Đã gửi ${x.sent} lần kiểm lên dữ liệu chung`));
+      renderSettings();
+    }, 'Đang kết nối dữ liệu chung...');
+    if ($('#csync')) $('#csync').onclick = () => guard(() => syncCloud(true).then(() => renderSettings()), 'Đang đồng bộ...');
+    if ($('#coff')) $('#coff').onclick = () => { if (confirm('Ngắt kết nối dữ liệu chung trên máy này? Dữ liệu chung vẫn còn nguyên, máy này chỉ không đồng bộ nữa.')) { Cloud.disconnect(); renderSettings(); } };
+    if ($('#ccopy')) $('#ccopy').onclick = () => {
+      const code = Cloud.makeCode(Cloud.settings());
+      $('#ccodebox').innerHTML = `<p class="small warnc-text">Gửi mã này <b>riêng</b> cho từng kế toán (tin nhắn cá nhân), không đăng lên nhóm chung. Ai có mã đều đọc/ghi được dữ liệu chung.</p>
+        <textarea readonly rows="3" id="ccodetxt">${E(code)}</textarea><button class="btn small-btn" id="ccp">Sao chép</button>`;
+      $('#ccp').onclick = () => { $('#ccodetxt').select(); (navigator.clipboard ? navigator.clipboard.writeText(code) : Promise.reject()).then(() => toast('Đã sao chép mã'), () => { document.execCommand('copy'); toast('Đã sao chép mã'); }); };
+    };
   }
 
   function facRow(f) {
@@ -1698,6 +1921,8 @@
     if (page === 'settings') return renderSettings();
     if (!user) return renderLogin();
     window.scrollTo(0, 0);
+    // Tài khoản chỉ xem không vào các màn hình kiểm kê
+    if (!Auth.can.count() && ['factories', 'import', 'count', 'review'].includes(page)) return go('#dashboard');
     switch (page) {
       case 'factories': return renderFactories(arg);
       case 'import': return renderImport(arg, location.hash.split('/')[2]);
@@ -1707,6 +1932,20 @@
       case 'dashboard': return renderDashboard();
       default: return renderHome();
     }
+  }
+
+  // Đồng bộ dữ liệu chung khi mở app / có mạng lại: gửi cài đặt đang chờ hoặc nhận cài đặt + tài khoản mới, rồi gửi các lần kiểm đang chờ
+  async function syncCloud(showToast) {
+    if (!Cloud.enabled() || !navigator.onLine) return;
+    try {
+      if (localStorage.getItem('kk_cloud_cfg_dirty')) { await Cloud.pushConfig(); localStorage.removeItem('kk_cloud_cfg_dirty'); }
+      else await Cloud.pullConfig();
+      if (!Auth.refreshUser()) { toast('Tài khoản của bạn đã bị quản trị viên xóa', 'err'); current = null; return go('#login'); }
+      const r = await flushCloud();
+      if (showToast) toast(`Đã đồng bộ${r.sent ? `, gửi ${r.sent} lần kiểm` : ''}`);
+      const page = location.hash.replace(/^#/, '').split('/')[0];
+      if (['', 'home', 'login', 'factories'].includes(page)) route();
+    } catch (e) { console.warn('syncCloud', e); if (showToast) toast(e.message, 'err'); }
   }
 
   async function boot() {
@@ -1720,6 +1959,8 @@
     window.addEventListener('pagehide', () => current && DB.put('sessions', current));
     refreshNet();
     route();
+    syncCloud(false);
+    window.addEventListener('online', () => syncCloud(false));
     if (Util.inAppBrowser) toast('Đang mở trong Zalo/Facebook/Teams: hãy mở bằng Chrome/Safari để tải và chia sẻ được file', 'err');
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       const hadController = !!navigator.serviceWorker.controller;

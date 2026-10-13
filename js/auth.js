@@ -127,16 +127,54 @@ const Auth = (function () {
     email = String(email).trim().toLowerCase();
     const u = Config.get().localUsers.find(x => x.email === email);
     if (!u || u.hash !== await Util.sha256(email + '|' + password)) throw new Error('Sai email hoặc mật khẩu');
-    setUser({ email, name: u.name, provider: 'local', admin: !!u.admin });
+    const role = roleOf(u);
+    setUser({ email, name: u.name, provider: 'local', admin: role === 'admin', role });
   }
 
-  async function addLocalUser(email, name, password, admin) {
+  // Phân quyền: admin = quản trị (cài đặt, tài khoản, xóa lịch sử); accountant = kế toán đi kiểm; viewer = chỉ xem dashboard / file
+  const ROLES = { admin: 'Quản trị', accountant: 'Kế toán', viewer: 'Chỉ xem' };
+  const roleOf = u => (u && (u.role || (u.admin ? 'admin' : 'accountant'))) || 'accountant';
+
+  // role: 'admin' | 'accountant' | 'viewer' (true/false cũ = admin / accountant)
+  async function addLocalUser(email, name, password, role) {
     email = String(email).trim().toLowerCase();
     if (!email || !password) throw new Error('Nhập đủ email và mật khẩu');
     if (!domainAllowed(email)) throw new Error('Email phải thuộc tên miền công ty: ' + Config.get().allowedDomains.join(', '));
+    if (role === true) role = 'admin'; else if (!ROLES[role]) role = 'accountant';
     const users = Config.get().localUsers.filter(x => x.email !== email);
-    users.push({ email, name: name || email, admin: !!admin, hash: await Util.sha256(email + '|' + password) });
+    users.push({ email, name: name || email, admin: role === 'admin', role, hash: await Util.sha256(email + '|' + password), createdAt: new Date().toISOString() });
     Config.save({ localUsers: users });
+  }
+
+  function setRole(email, role) {
+    const users = Config.get().localUsers.map(x => x.email === email ? Object.assign({}, x, { role, admin: role === 'admin' }) : x);
+    if (!users.some(x => roleOf(x) === 'admin')) throw new Error('Phải còn ít nhất một tài khoản quản trị');
+    Config.save({ localUsers: users });
+  }
+
+  // Quyền của người đang đăng nhập. Tài khoản Microsoft: theo tài khoản nội bộ cùng email nếu có, không thì là kế toán
+  function role() {
+    const u = currentUser();
+    if (!u) return null;
+    const local = Config.get().localUsers.find(x => x.email === u.email);
+    if (local) return roleOf(local);
+    if (!Config.get().localUsers.length) return 'admin'; // máy chưa có tài khoản nào: người tạo đầu tiên là quản trị
+    return u.provider === 'microsoft' ? 'accountant' : roleOf(u);
+  }
+  const can = {
+    settings: () => role() === 'admin',
+    deleteHistory: () => role() === 'admin',
+    count: () => role() === 'admin' || role() === 'accountant'
+  };
+  // Sau khi đồng bộ tài khoản từ dữ liệu chung: tài khoản bị xóa thì đăng xuất, đổi quyền thì cập nhật
+  function refreshUser() {
+    const u = currentUser();
+    if (!u || u.provider !== 'local') return true;
+    const local = Config.get().localUsers.find(x => x.email === u.email);
+    if (!local) { localStorage.removeItem(USER_KEY); return false; }
+    u.role = roleOf(local); u.admin = u.role === 'admin'; u.name = local.name;
+    localStorage.setItem(USER_KEY, JSON.stringify(u));
+    return true;
   }
 
   function removeLocalUser(email) {
@@ -164,5 +202,5 @@ const Auth = (function () {
     }
   }
 
-  return { init, useMicrosoft, currentUser, loginMicrosoft, loginLocal, addLocalUser, removeLocalUser, logout, getToken, domainAllowed };
+  return { init, useMicrosoft, currentUser, loginMicrosoft, loginLocal, addLocalUser, removeLocalUser, setRole, role, roleOf, can, refreshUser, ROLES, logout, getToken, domainAllowed };
 })();

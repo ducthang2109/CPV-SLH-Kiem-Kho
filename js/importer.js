@@ -4,6 +4,7 @@ const Importer = (function () {
   const COLS = {
     code: ['product_code', 'ma hang', 'mã hàng', 'code', 'mã sap', 'ma sap', 'material', 'material code', 'mã vật tư', 'ma vat tu'],
     name: ['product_name', 'ten hang', 'tên hàng', 'name', 'tên sản phẩm', 'ten san pham', 'material description', 'tên vật tư', 'ten vat tu', 'description'],
+    nameVi: ['tên tiếng việt', 'ten tieng viet', 'tên tv', 'vietnamese name', 'mô tả tiếng việt'],
     lot: ['lot', 'lo', 'lô', 'batch'],
     location: ['location', 'kho', 'warehouse', 'storage location', 'sloc', 'mã kho', 'ma kho'],
     whName: ['tên kho', 'ten kho', 'warehouse name', 'storage location description', 'descr. of storage loc.'],
@@ -154,6 +155,7 @@ const Importer = (function () {
         id: 'L' + (i + 1),
         code: txt(r[idx.code]),
         name: idx.name != null ? txt(r[idx.name]) : '',
+        nameVi: idx.nameVi != null ? txt(r[idx.nameVi]) : '', // không có thì app tự dịch (Glossary)
         unit: unitOf(r),
         lot: idx.lot != null ? String(r[idx.lot]).trim() : '',
         warehouseCode: loc.code,
