@@ -2,15 +2,17 @@
 // production_date, QTY, WGH, Ages(day), shelf life Ages) và chuẩn hoá thành danh sách dòng kiểm kê.
 const Importer = (function () {
   const COLS = {
-    code: ['product_code', 'ma hang', 'mã hàng', 'code'],
-    name: ['product_name', 'ten hang', 'tên hàng', 'name'],
+    code: ['product_code', 'ma hang', 'mã hàng', 'code', 'mã sap', 'ma sap', 'material', 'material code', 'mã vật tư', 'ma vat tu'],
+    name: ['product_name', 'ten hang', 'tên hàng', 'name', 'tên sản phẩm', 'ten san pham', 'material description', 'tên vật tư', 'ten vat tu', 'description'],
     lot: ['lot', 'lo', 'lô', 'batch'],
-    location: ['location', 'kho', 'warehouse'],
+    location: ['location', 'kho', 'warehouse', 'storage location', 'sloc', 'mã kho', 'ma kho'],
+    whName: ['tên kho', 'ten kho', 'warehouse name', 'storage location description', 'descr. of storage loc.'],
+    sysName: ['system', 'hệ thống', 'he thong'],
     prodDate: ['production_date', 'ngay san xuat', 'ngày sản xuất', 'nsx', 'mfg date'],
-    qty: ['qty', 'so luong', 'số lượng', 'quantity'],
+    qty: ['qty', 'so luong', 'số lượng', 'quantity', 'unrestricted', 'unrestricted stock', 'tồn kho', 'ton kho', 'sl tồn'],
     wgh: ['wgh', 'weight', 'khoi luong', 'khối lượng', 'trong luong'],
     ages: ['ages(day)', 'ages', 'tuoi'],
-    unit: ['unit', 'uom', 'dvt', 'đvt', 'don vi', 'đơn vị'],
+    unit: ['unit', 'uom', 'dvt', 'đvt', 'don vi', 'đơn vị', 'base unit of measure', 'bun'],
     shelfLife: ['shelf life ages', 'shelf life', 'shelf_life', 'han su dung', 'hạn sử dụng', 'hsd'],
     org: ['org_code', 'org', 'ma don vi'],          // mã nhà máy, ví dụ B43210
     stockDate: ['stk_doc_date', 'stock date', 'ngay ton'] // ngày chốt số liệu tồn
@@ -18,13 +20,15 @@ const Importer = (function () {
 
   const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
-  function mapHeader(header) {
+  // mode 'meat': file FDREPORT (có lô, NSX, hạn dùng); mode 'supplies': vật tư / bao bì chỉ cần mã và số lượng
+  function mapHeader(header, mode) {
     const idx = {};
     header.forEach((h, i) => {
       const n = norm(h);
       for (const key in COLS) if (idx[key] == null && COLS[key].includes(n)) idx[key] = i;
     });
-    const missing = ['code', 'lot', 'location', 'prodDate', 'qty', 'shelfLife'].filter(k => idx[k] == null);
+    const need = mode === 'supplies' ? ['code', 'qty'] : ['code', 'lot', 'location', 'prodDate', 'qty', 'shelfLife'];
+    const missing = need.filter(k => idx[k] == null);
     if (missing.length) throw new Error('File không đúng form mẫu, thiếu cột: ' + missing.join(', '));
     return idx;
   }
@@ -101,54 +105,69 @@ const Importer = (function () {
     }
   }
 
-  function parse(arrayBuffer, fileName) {
-    const rows = readRows(arrayBuffer).filter(r => r.some(c => c !== '' && c != null));
-    if (rows.length < 2) throw new Error('File không có dữ liệu');
-    const idx = mapHeader(rows[0]);
-    const body = rows.slice(1);
+  function parse(arrayBuffer, fileName, mode) {
+    mode = mode || 'meat';
+    const all = readRows(arrayBuffer).filter(r => r.some(c => c !== '' && c != null));
+    if (all.length < 2) throw new Error('File không có dữ liệu');
+    // Dòng tiêu đề có thể không nằm ở dòng 1 (file xuất từ SAP có dòng tên báo cáo phía trên)
+    let hi = 0, idx = null, firstErr = null;
+    for (let i = 0; i < Math.min(10, all.length - 1); i++) {
+      try { idx = mapHeader(all[i], mode); hi = i; break; } catch (e) { firstErr = firstErr || e; }
+    }
+    if (!idx) throw firstErr;
+    const body = all.slice(hi + 1);
     const isTcvn3 = body.some(r => looksTcvn3(r[idx.name]) || looksTcvn3(r[idx.location]));
     // Trong cùng file có dòng TCVN3 lẫn dòng Unicode (ví dụ "Nạc Vai 5kg ĐL"):
     // có ký tự đặc trưng TCVN3 -> chuyển; có chữ Việt Unicode (ạ, ư, Đ...) -> giữ nguyên; còn lại theo bảng mã chung của file
     const txt = v => {
       const s = String(v == null ? '' : v).trim();
       if (looksTcvn3(s)) return tcvn3ToUnicode(s, true);
-      if (/[Ā-ỿ]/.test(s)) return s;
+      if (/[\u0100-\u1EFF]/.test(s)) return s;
       return tcvn3ToUnicode(s, isTcvn3);
     };
     const orgCode = idx.org != null ? String(body[0][idx.org] || '').trim() : '';
     const stockDate = idx.stockDate != null ? parseDate(body[0][idx.stockDate]) : null;
-    // Cột Unit trong file hệ thống là mã 1 ký tự (vd "D"), không phải tên đơn vị -> đoán theo tên hàng
+    // Meat: cột Unit là mã 1 ký tự (vd "D"), không phải tên đơn vị -> đoán theo tên hàng. Vật tư: dùng đúng ĐVT trong file (PC, M, BOX...)
     const unitOf = r => {
       const u = idx.unit != null ? txt(r[idx.unit]) : '';
+      if (mode === 'supplies') return u;
       return u.length > 1 ? u : guessUnit(txt(r[idx.name]));
+    };
+    // Kho: "0001 - Kho Spare Parts" hoặc mã kho + cột tên kho riêng
+    const locOf = r => {
+      const raw = idx.location != null ? txt(r[idx.location]) : '';
+      const name = idx.whName != null ? txt(r[idx.whName]) : '';
+      if (raw && name && !raw.includes(' - ')) return parseLocation(`${raw} - ${name}`);
+      return parseLocation(raw || name || 'Kho');
     };
 
     const sites = new Set();
     const items = body.map((r, i) => {
-      const loc = parseLocation(txt(r[idx.location]));
+      const loc = locOf(r);
       if (loc.site) sites.add(loc.site);
       return {
         id: 'L' + (i + 1),
         code: txt(r[idx.code]),
         name: idx.name != null ? txt(r[idx.name]) : '',
         unit: unitOf(r),
-        lot: String(r[idx.lot]).trim(),
+        lot: idx.lot != null ? String(r[idx.lot]).trim() : '',
         warehouseCode: loc.code,
         warehouse: loc.full,
-        prodDate: parseDate(r[idx.prodDate]),
+        system: idx.sysName != null ? txt(r[idx.sysName]) : '',
+        prodDate: idx.prodDate != null ? parseDate(r[idx.prodDate]) : null,
         sysQty: num(r[idx.qty]),
         sysWgh: idx.wgh != null ? num(r[idx.wgh]) : 0,
         ages: idx.ages != null ? String(r[idx.ages]) : '',
-        shelfLife: num(r[idx.shelfLife]),
+        shelfLife: idx.shelfLife != null ? num(r[idx.shelfLife]) : 0,
         actualQty: null,
         actualWgh: null,
         note: '',
         photos: [],
         isExtra: false
       };
-    }).filter(it => it.code);
+    }).filter(it => it.code && !/^t[ổo]ng/i.test(it.code));
 
-    return { fileName, importedAt: new Date().toISOString(), encoding: isTcvn3 ? 'TCVN3' : 'Unicode', sites: [...sites], orgCode, stockDate, items };
+    return { fileName, mode, importedAt: new Date().toISOString(), encoding: isTcvn3 ? 'TCVN3' : 'Unicode', sites: [...sites], orgCode, stockDate, items };
   }
 
   return { parse, parseDate, parseLocation };

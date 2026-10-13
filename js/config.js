@@ -24,12 +24,12 @@ window.APP_DEFAULT_CONFIG = {
   // Danh sách nhà máy. code = ORG_CODE trong file tồn kho.
   // inputFile: tên file trong thư mục Input, có thể kèm thư mục con và dùng * làm ký tự đại diện
   factories: [
-    { code: 'B43210', name: 'Chi Nhánh NM3 tại Hà Nội – Pha lóc', address: 'Lô CN5, KCN Phú Nghĩa, xã Phú Nghĩa, TP. Hà Nội', inputFile: 'Data/B43210_*.xlsx' },
-    { code: 'B65710', name: 'Chi Nhánh NM3 tại Hà Nội – Giết mổ', address: 'Lô CN5, KCN Phú Nghĩa, xã Phú Nghĩa, TP. Hà Nội', inputFile: 'Data/B65710_*.xlsx' },
+    { code: 'B43210', name: 'Chi Nhánh NM3 tại Hà Nội – Pha lóc', address: 'Lô CN5, KCN Phú Nghĩa, xã Phú Nghĩa, TP. Hà Nội', inputFile: 'Data Warehouse FG/B43210_*.xlsx', suppliesFile: 'Data SparePart Supplies/*.xlsx' },
+    { code: 'B65710', name: 'Chi Nhánh NM3 tại Hà Nội – Giết mổ', address: 'Lô CN5, KCN Phú Nghĩa, xã Phú Nghĩa, TP. Hà Nội', inputFile: 'Data Warehouse FG/B65710_*.xlsx', suppliesFile: 'Data SparePart Supplies/*.xlsx' },
     { code: '333', name: 'Chi Nhánh NM3 tại Hà Nội', address: 'Lô CN5, KCN Phú Nghĩa, xã Phú Nghĩa, TP. Hà Nội', inputFile: 'FDREPORT-333*.xlsx' }
   ],
   // Tăng số này khi thêm nhà máy mặc định mới: máy đã lưu cài đặt cũ sẽ được bổ sung nhà máy mới
-  factoriesVersion: 2,
+  factoriesVersion: 3,
 
   // Cảnh báo hạn sử dụng: "sắp hết hạn" khi số ngày còn lại <= max(nearExpiryMinDays, hạn dùng * nearExpiryRatio)
   nearExpiryRatio: 0.25,

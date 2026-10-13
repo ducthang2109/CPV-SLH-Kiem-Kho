@@ -24,6 +24,13 @@ const Util = (function () {
     return { status: 'ok', label: `Còn hạn ${daysLeft} ngày`, expDate, daysLeft };
   }
 
+  // Ghi giờ đếm của dòng hàng (để biết giờ bắt đầu / kết thúc kiểm từng kho)
+  function touch(item) {
+    const n = new Date().toISOString();
+    if (!item.countedAt) item.countedAt = n;
+    item.lastAt = n;
+  }
+
   // Nhiều lần cân / quét tem cho một dòng hàng: SL và KL thực tế = tổng các lần
   function applyWeighs(item) {
     const w = item.weighs || [];
@@ -204,5 +211,5 @@ const Util = (function () {
 
   const safeName = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w.-]+/g, '_');
 
-  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, applyWeighs, parseLabel, compressImage, cropImage, readLogo, sha256, download, share, shareMany, openExternal, safeName, isIOS, inAppBrowser, canShareFile };
+  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, applyWeighs, parseLabel, touch, compressImage, cropImage, readLogo, sha256, download, share, shareMany, openExternal, safeName, isIOS, inAppBrowser, canShareFile };
 })();

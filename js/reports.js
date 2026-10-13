@@ -106,7 +106,7 @@ const Reports = (function () {
     const H = (t, o = {}) => Object.assign({ text: t, style: 'th' }, o);
     const body = [
       [H('STT', { rowSpan: 3 }), H('Mã SAP', { rowSpan: 3 }), H('Tên Sản Phẩm', { rowSpan: 3 }), H('ĐVT', { rowSpan: 3 }), H('Lot', { rowSpan: 3 }),
-        H(cfg.systemName || 'SmartSoft_Food', { colSpan: 2 }), {}, H('Kiểm Thực Tế', { colSpan: 2 }), {}, H('Chênh Lệch', { colSpan: 2 }), {},
+        H((s.factory && s.factory.systemName) || cfg.systemName || 'SmartSoft_Food', { colSpan: 2 }), {}, H('Kiểm Thực Tế', { colSpan: 2 }), {}, H('Chênh Lệch', { colSpan: 2 }), {},
         H('Ghi Chú', { rowSpan: 3 })],
       [{}, {}, {}, {}, {}, H('(1)', { colSpan: 2 }), {}, H('(2)', { colSpan: 2 }), {}, H('(3) = (2) - (1)', { colSpan: 2 }), {}, {}],
       [{}, {}, {}, {}, {}, H('Số Lượng'), H('Trọng Lượng'), H('Số Lượng'), H('Trọng Lượng'), H('Số Lượng'), H('Trọng Lượng'), {}]
