@@ -242,6 +242,11 @@
       meat: 'File tồn kho theo mẫu FDREPORT (có ORG_CODE thì app tự nhận nhà máy).'
     };
     view().innerHTML = `
+      ${Cloud.enabled() ? `<div class="card ok-card">
+        <h3>☁ Lấy file mới nhất từ dữ liệu chung</h3>
+        <p class="muted small">File trong OneDrive › Apps Kiem Kho › Input được máy tính đồng bộ lên tự động. Mẫu tên file: ${E(pattern)}</p>
+        <div id="cloudFiles"><p class="muted small">Đang tải danh sách file...</p></div>
+      </div>` : ''}
       ${ms ? `<div class="card">
         <h3>Tự tìm trên OneDrive</h3>
         <p class="muted small">Thư mục: ${E(Config.get().oneDrive.inputFolder)} · mẫu tên file: ${E(pattern)}</p>
@@ -285,6 +290,26 @@
       for (const file of e.target.files) list.push({ buf: await file.arrayBuffer(), name: file.name, fileDate: file.lastModified ? new Date(file.lastModified).toISOString() : null });
       if (list.length) load(list);
     };
+    // Danh sách file Input trên dữ liệu chung (script đồng bộ trên máy tính đẩy lên), mới nhất lên đầu
+    if ($('#cloudFiles')) Cloud.inputFiles(pattern).then(list => {
+      const box = $('#cloudFiles');
+      if (!box) return;
+      if (!list.length) { box.innerHTML = '<p class="muted small">Chưa có file phù hợp trên dữ liệu chung. Kiểm tra máy tính đồng bộ đang bật, hoặc chọn file từ OneDrive bên dưới.</p>'; return; }
+      const multi = type === 'supplies';
+      box.innerHTML = list.slice(0, 12).map((x, i) => `<label class="cfile ${i === 0 ? 'newest' : ''}">
+          <input type="${multi ? 'checkbox' : 'radio'}" name="cf" value="${i}" ${i === 0 || (multi && x.folder === list[0].folder && /^\d{4}\.xlsx$/i.test(x.name)) ? 'checked' : ''}>
+          <span><b>${E(x.name)}</b><span class="muted small"> · ${Util.vnDateTime(x.modified)}${i === 0 ? ' · mới nhất' : ''}</span></span>
+        </label>`).join('') + `<button class="btn primary block" id="cfLoad">Tải ${multi ? 'các file đã chọn' : 'file đã chọn'}</button>`;
+      $('#cfLoad').onclick = () => {
+        const picked = $$('#cloudFiles input:checked').map(x => list[Number(x.value)]);
+        if (!picked.length) return toast('Chọn ít nhất một file', 'err');
+        guard(async () => {
+          const files = [];
+          for (const x of picked) files.push({ buf: await (await Cloud.getBlob(x.path)).arrayBuffer(), name: x.name, fileDate: x.modified });
+          load(files);
+        }, 'Đang tải file từ dữ liệu chung...');
+      };
+    }).catch(e => { const box = $('#cloudFiles'); if (box) box.innerHTML = `<p class="small short">Không đọc được danh sách file: ${E(e.message)}</p>`; });
     if ($('#od')) $('#od').onclick = () => guard(async () => {
       const { folder, match, all } = await OneDrive.findInputFile(Object.assign({}, f, { inputFile: pattern }));
       $('#odList').innerHTML = all.map(x => `<button class="btn block ${match && x.name === match.name ? 'primary' : ''}" data-f="${E(x.name)}">${E(x.name)} <span class="small">· ${Util.vnDateTime(x.lastModifiedDateTime)}</span></button>`).join('') || '<p class="muted">Không thấy file Excel trong thư mục.</p>';
@@ -1790,6 +1815,7 @@
           <label class="btn small-btn primary">⬆ Nạp file Master (Excel)<input type="file" id="mIn" hidden accept=".xlsx,.xls"></label>
           <button class="btn small-btn" id="mTpl">⬇ Tải file mẫu Master</button>
           ${Auth.useMicrosoft() ? '<button class="btn small-btn" id="mOd">☁ Nạp từ OneDrive</button>' : ''}
+          ${Cloud.enabled() ? '<button class="btn small-btn" id="mCloud">☁ Nạp Master mới nhất từ dữ liệu chung</button>' : ''}
         </div>
       </div>
       <div class="card">
@@ -1797,6 +1823,7 @@
         <p class="small">${(() => { const cl = checklistTemplate(); return `<b>${E(cl.title)}</b> · ${cl.sections.length} khu vực · ${cl.sections.reduce((a, x) => a + x.items.length, 0)} chỉ tiêu${localStorage.getItem('kk_checklist') ? ' (mẫu riêng)' : ' (mẫu mặc định SLH.01)'}`; })()}</p>
         <div class="row gap">
           <label class="btn small-btn">⬆ Nạp mẫu checklist (Excel)<input type="file" id="cIn" hidden accept=".xlsx,.xls"></label>
+          ${Cloud.enabled() ? '<button class="btn small-btn" id="cCloud">☁ Lấy mẫu từ Data check Branch</button>' : ''}
           ${localStorage.getItem('kk_checklist') ? '<button class="btn small-btn" id="cDef">Dùng mẫu mặc định</button>' : ''}
         </div>
       </div>
@@ -1857,17 +1884,30 @@
     $('#mIn').onchange = async e => { const f = e.target.files[0]; if (f) loadMaster(await f.arrayBuffer(), f.name); };
     $('#mTpl').onclick = () => Util.download(Master.templateBlob(Config.get().factories), 'Master_NhaMay.xlsx');
     if ($('#mOd')) $('#mOd').onclick = () => guard(async () => loadMaster(await OneDrive.download(Config.get().oneDrive.inputFolder, 'Master_NhaMay.xlsx'), 'Master_NhaMay.xlsx'), 'Đang tải từ OneDrive...');
+    if ($('#mCloud')) $('#mCloud').onclick = () => guard(async () => {
+      const [m] = await Cloud.inputFiles('Master_NhaMay.xlsx');
+      if (!m) throw new Error('Chưa có Master_NhaMay.xlsx trên dữ liệu chung (máy tính đồng bộ chưa đẩy lên)');
+      loadMaster(await (await Cloud.getBlob(m.path)).arrayBuffer(), m.name + ' (' + Util.vnDateTime(m.modified) + ')');
+    }, 'Đang tải Master...');
+    if ($('#cCloud')) $('#cCloud').onclick = () => guard(async () => {
+      const [m] = await Cloud.inputFiles('Data check Branch/*.xlsx');
+      if (!m) throw new Error('Chưa có file mẫu trong Data check Branch trên dữ liệu chung');
+      const cl = Master.parseChecklist(await (await Cloud.getBlob(m.path)).arrayBuffer());
+      if (!confirm(`Dùng mẫu "${cl.title}" từ file ${m.name} (${cl.sections.length} khu vực) cho kiểm tra chi nhánh?`)) return;
+      localStorage.setItem('kk_checklist', JSON.stringify(cl)); Cloud.pushConfigSoon();
+      toast('Đã cập nhật mẫu kiểm tra chi nhánh'); renderSettings();
+    }, 'Đang tải mẫu checklist...');
     $('#cIn').onchange = async e => {
       const f = e.target.files[0];
       if (!f) return;
       guard(async () => {
         const cl = Master.parseChecklist(await f.arrayBuffer());
         if (!confirm(`Dùng mẫu "${cl.title}" (sheet ${cl.sheet}, ${cl.sections.length} khu vực) cho kiểm tra chi nhánh?`)) return;
-        localStorage.setItem('kk_checklist', JSON.stringify(cl));
+        localStorage.setItem('kk_checklist', JSON.stringify(cl)); Cloud.pushConfigSoon();
         toast('Đã cập nhật mẫu kiểm tra chi nhánh'); renderSettings();
       }, 'Đang đọc mẫu checklist...');
     };
-    if ($('#cDef')) $('#cDef').onclick = () => { localStorage.removeItem('kk_checklist'); renderSettings(); };
+    if ($('#cDef')) $('#cDef').onclick = () => { localStorage.removeItem('kk_checklist'); Cloud.pushConfigSoon(); renderSettings(); };
     $('#logoIn').onchange = e => {
       const file = e.target.files[0];
       if (!file) return;

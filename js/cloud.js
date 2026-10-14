@@ -180,6 +180,18 @@ const Cloud = (function () {
     if (list) localStorage.setItem(key, JSON.stringify({ at: new Date().toISOString(), list: list.filter(x => x.id !== rec.id) }));
   }
 
+  // File Input (file tồn, Master...) do script đồng bộ trên máy tính đẩy lên: lọc theo mẫu "Thư mục/Tên*.xlsx", mới nhất trước
+  async function inputFiles(pattern) {
+    const { data } = await getJson('input/_index.json');
+    const list = (data && data.files) || [];
+    const p = String(pattern || '*').replace(/\\/g, '/');
+    const folder = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+    const glob = p.slice(p.lastIndexOf('/') + 1) || '*';
+    const re = new RegExp('^' + glob.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$', 'i');
+    return list.filter(x => (x.folder || '').toLowerCase() === folder.toLowerCase() && re.test(x.name) && /\.(xlsx|xls|pdf|csv)$/i.test(x.name))
+      .sort((a, b) => String(b.modified).localeCompare(String(a.modified)));
+  }
+
   // Hàng đợi: id phiên cần gửi lên (gửi khi có mạng)
   const queue = () => { try { return JSON.parse(localStorage.getItem(QUEUE) || '[]'); } catch (e) { return []; } };
   const setQueue = q => localStorage.setItem(QUEUE, JSON.stringify([...new Set(q)]));
@@ -200,5 +212,5 @@ const Cloud = (function () {
     return rec;
   }
 
-  return { enabled, settings, makeCode, readCode, connect, disconnect, pullConfig, pushConfig, pushConfigSoon, saveHistory, loadHistory, historyYear, cachedHistory, deleteHistory, upload, getBlob, queue, setQueue, enqueue };
+  return { enabled, settings, makeCode, readCode, connect, disconnect, pullConfig, pushConfig, pushConfigSoon, saveHistory, loadHistory, historyYear, cachedHistory, deleteHistory, inputFiles, upload, getBlob, queue, setQueue, enqueue };
 })();

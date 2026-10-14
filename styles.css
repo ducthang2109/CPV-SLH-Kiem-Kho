@@ -263,3 +263,9 @@ header #back:not([hidden]) + .hdr-logo { margin-left: -4px; }
 .remember { margin: 6px 0 10px; align-items: center; }
 .remember input { width: auto; margin: 0; }
 #ccode { font-family: monospace; font-size: 12px; }
+
+/* ===== v2.5: chọn file từ dữ liệu chung ===== */
+.cfile { display: flex; gap: 10px; align-items: flex-start; padding: 8px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.cfile input { width: auto; margin: 3px 0 0; }
+.cfile.newest b { color: var(--brand); }
+#cfLoad { margin-top: 10px; }
