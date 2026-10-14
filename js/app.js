@@ -56,7 +56,7 @@
     view().innerHTML = `
       <div class="card center-card">
         <img src="icons/icon-192.png" class="logo" alt="">
-        <h2>CPV SLH Kiem Kho</h2>
+        <h2>CPV SLH Kiểm Kê</h2>
         <p class="muted">${E(cfg.companyName)}</p>
         ${ms ? `<button class="btn primary block" id="msLogin">Đăng nhập tài khoản Microsoft công ty</button>
                 <p class="muted small">Chỉ chấp nhận email: ${E((cfg.allowedDomains || []).join(', ') || 'mọi tên miền')}</p>` : ''}
@@ -116,7 +116,7 @@
 
   async function renderHome() {
     const user = Auth.currentUser();
-    setTitle('CPV SLH Kiem Kho');
+    setTitle('CPV SLH Kiểm Kê');
     const open = (await DB.all('sessions')).filter(s => s.status !== 'done').sort((a, b) => b.startedAt.localeCompare(a.startedAt));
     const canCount = Auth.can.count();
     view().innerHTML = `
@@ -133,13 +133,36 @@
         <div><div class="type-name">Dashboard & lịch sử kiểm kho</div><div class="muted small">Theo năm, tháng, timeline từng kế toán</div></div>
         <span class="chev">›</span>
       </div>
-      ${open.length ? `<h3 class="section">Phiên đang làm dở</h3>${open.map(s => `
-        <div class="card row between click" data-open="${s.id}">
-          <div><b>${E(TYPES[typeOf(s)].name)}</b><div class="muted small">${E(s.factory.name)} · ${Util.vnDate(s.countDate)}</div></div><span>›</span>
+      ${open.length && canCount ? `<h3 class="section">Phiên đang làm dở (${open.length})</h3>${open.map(s => `
+        <div class="card open-row">
+          <div data-open="${s.id}"><b>${TYPES[typeOf(s)].icon} ${E(TYPES[typeOf(s)].name)}</b><div class="muted small">${E(s.factory.name)} · ${Util.vnDate(s.countDate)} · ${E(s.user.name)}${typeOf(s) === 'branch' ? '' : ` · ${s.items.filter(i => i.actualQty != null).length}/${s.items.length} dòng`}</div></div>
+          <button class="btn small-btn icon-del" data-delopen="${s.id}" title="Xóa phiên này">🗑</button>
+          <span class="chev" data-open="${s.id}">›</span>
         </div>`).join('')}` : ''}`;
     $$('[data-type]').forEach(b => b.onclick = () => go('#factories/' + b.dataset.type));
     $('[data-dash]').onclick = () => go('#dashboard');
     $$('[data-open]').forEach(b => b.onclick = () => go('#count/' + b.dataset.open));
+    $$('[data-delopen]').forEach(b => b.onclick = () => deleteOpenSession(b.dataset.delopen, renderHome));
+  }
+
+  // Xóa phiên đang làm dở (kế toán và quản trị): xóa trên máy và dòng "đang kiểm" trên dữ liệu chung
+  async function deleteOpenSession(id, after) {
+    const s = await DB.get('sessions', id);
+    if (!s || s.status === 'done') return;
+    const n = typeOf(s) === 'branch' ? 0 : s.items.filter(i => i.actualQty != null).length;
+    if (!confirm(`Xóa phiên ${TYPES[typeOf(s)].name} · ${s.factory.name} · ${Util.vnDate(s.countDate)}?${n ? `\nĐã đếm ${n} dòng, toàn bộ số liệu, ảnh và chữ ký của phiên này sẽ mất.` : ''}\nKhông khôi phục được.`)) return;
+    await guard(async () => {
+      await DB.del('sessions', id);
+      await DB.del('files', id).catch(() => {});
+      await DB.del('files', 'src:' + id).catch(() => {});
+      if (current && current.id === id) current = null;
+      Cloud.setQueue(Cloud.queue().filter(x => x !== id));
+      if (Cloud.enabled() && (s.cloud || s.checkIn)) {
+        try { await Cloud.deleteHistory(cloudRecord(s)); } catch (e) { console.warn(e); toast('Đã xóa trên máy. Chưa xóa được dòng "đang kiểm" trên dữ liệu chung (kiểm tra mạng)', 'err'); return; }
+      }
+      toast('Đã xóa phiên đang làm dở');
+    }, 'Đang xóa phiên...');
+    after && after();
   }
 
   // ---------- chọn nhà máy (theo loại kiểm) ----------
@@ -162,7 +185,7 @@
           ${f.address ? `<p class="muted small">${E(f.address)}</p>` : ''}
           ${type !== 'branch' ? `<p class="muted small">${ds ? `Dữ liệu: ${E(ds.fileName)} · ${ds.items.length} dòng${ds.stockDate ? ' · tồn ngày ' + Util.vnDate(ds.stockDate) : ''}` : 'Chưa có dữ liệu tồn kho trên máy'}</p>
           ${stale ? '<p class="small warnc-text">Dữ liệu không phải của hôm nay. Nếu có file mới, bấm "Tải lại dữ liệu".</p>' : ''}` : ''}
-          ${open.map(s => `<button class="btn block warn" data-open="${s.id}">Tiếp tục phiên ${Util.vnDate(s.countDate)}${type === 'branch' ? '' : ` · ${s.items.filter(i => i.actualQty != null).length}/${s.items.length} dòng`}</button>`).join('')}
+          ${open.map(s => `<div class="row gap"><button class="btn block warn" data-open="${s.id}">Tiếp tục phiên ${Util.vnDate(s.countDate)}${type === 'branch' ? '' : ` · ${s.items.filter(i => i.actualQty != null).length}/${s.items.length} dòng`}</button><button class="btn small-btn icon-del" data-delopen="${s.id}" title="Xóa phiên này">🗑</button></div>`).join('')}
           <div class="row gap">
             ${type !== 'branch' ? `<button class="btn" data-import="${E(f.code)}">${ds ? 'Tải lại dữ liệu' : 'Tải dữ liệu'}</button>` : ''}
             ${type === 'branch' || ds ? `<button class="btn primary" data-start="${E(f.code)}">${type === 'branch' ? 'Bắt đầu kiểm tra' : 'Bắt đầu kiểm kê'}</button>` : ''}
@@ -177,6 +200,7 @@
         </div>`).join('') || '<p class="muted">Chưa có.</p>'}`;
     $$('[data-import]').forEach(b => b.onclick = () => go('#import/' + b.dataset.import + '/' + type));
     $$('[data-start]').forEach(b => b.onclick = () => startSession(b.dataset.start, type));
+    $$('[data-delopen]').forEach(b => b.onclick = () => deleteOpenSession(b.dataset.delopen, () => renderFactories(type)));
     $$('[data-open]').forEach(b => b.onclick = () => go('#count/' + b.dataset.open));
     $$('[data-done]').forEach(b => b.onclick = () => go('#done/' + b.dataset.done));
   }
@@ -370,7 +394,16 @@
   }
 
   // ---------- kiểm kê ----------
-  const filters = { q: '', wh: '', st: 'all', limit: 80 };
+  const filters = { q: '', wh: '', st: 'all', sort: '', limit: 80 };
+  // Sắp xếp danh sách kiểm: theo mã / tên, tăng hoặc giảm (mặc định giữ thứ tự trong file)
+  const SORTS = [['', 'Thứ tự trong file'], ['code', 'Mã: nhỏ → lớn'], ['-code', 'Mã: lớn → nhỏ'], ['name', 'Tên: A → Z'], ['-name', 'Tên: Z → A'], ['qty', 'SL sổ sách: ít → nhiều'], ['-qty', 'SL sổ sách: nhiều → ít']];
+  const collator = new Intl.Collator('vi', { numeric: true, sensitivity: 'base' });
+  function sortItems(list, key) {
+    if (!key) return list;
+    const dir = key.startsWith('-') ? -1 : 1, k = key.replace('-', '');
+    const val = it => k === 'qty' ? it.sysQty : k === 'name' ? (Glossary.nameVi(it) || it.name || '') : String(it.code || '') + ' ' + (it.lot || '');
+    return list.slice().sort((a, b) => dir * (k === 'qty' ? val(a) - val(b) : collator.compare(val(a), val(b))));
+  }
 
   async function renderCount(id) {
     const s = await loadSession(id);
@@ -398,6 +431,7 @@
               .map(([v, t]) => `<option value="${v}" ${filters.st === v ? 'selected' : ''}>${t}</option>`).join('')}
           </select>
         </div>
+        <div class="row gap sort-row"><select id="so">${SORTS.map(([v, t]) => `<option value="${v}" ${filters.sort === v ? 'selected' : ''}>↕ Sắp xếp: ${t}</option>`).join('')}</select></div>
       </div>
       ${signedWarning(s)}
       <div id="list"></div>
@@ -409,6 +443,7 @@
     $('#scan').onclick = () => scanCode(s, () => drawList());
     $('#wh').onchange = e => { filters.wh = e.target.value; filters.limit = 80; drawList(); };
     $('#st').onchange = e => { filters.st = e.target.value; filters.limit = 80; drawList(); };
+    $('#so').onchange = e => { filters.sort = e.target.value; filters.limit = 80; drawList(); };
     $('#add').onclick = () => addExtra(s);
     $('#review').onclick = () => go('#review/' + s.id);
     drawList();
@@ -581,7 +616,7 @@
 
   function drawList() {
     const s = current;
-    const list = s.items.filter(it => matches(it, s));
+    const list = sortItems(s.items.filter(it => matches(it, s)), filters.sort);
     const shown = list.slice(0, filters.limit);
     $('#list').innerHTML = shown.map(it => itemCard(it, s)).join('') +
       (list.length > shown.length ? `<button class="btn block" id="more">Xem thêm ${list.length - shown.length} dòng</button>` : '') +
@@ -1431,7 +1466,7 @@
 
   async function renderDashboard() {
     setTitle('Dashboard kiểm kho', '#home');
-    const st = renderDashboard.state = renderDashboard.state || { year: String(new Date().getFullYear()), month: String(new Date().getMonth() + 1).padStart(2, '0'), type: '', user: '', view: 'month' };
+    const st = renderDashboard.state = renderDashboard.state || { year: String(new Date().getFullYear()), month: String(new Date().getMonth() + 1).padStart(2, '0'), type: '', user: '', factory: '', status: '', view: 'month' };
     const own = (await DB.all('sessions')).filter(s => s.checkIn || s.status === 'done').map(summaryOf);
     // Lịch sử chung: hiện ngay bản đã lưu trên máy, rồi tải bản mới nhất
     const cloudList = Cloud.enabled() ? (Cloud.cachedHistory(st.year) || []) : [];
@@ -1469,7 +1504,11 @@
     const thisYear = String(new Date().getFullYear());
     const years = [...new Set(all.map(h => h.date.slice(0, 4)).concat(thisYear, st.year))].sort().reverse();
     const users = [...new Set(all.map(h => h.user))].sort();
-    const inYear = all.filter(h => h.date.startsWith(st.year) && (!st.type || h.type === st.type) && (!st.user || h.user === st.user));
+    const facNames = new Map(); all.forEach(h => { if (h.factoryCode && !facNames.has(h.factoryCode)) facNames.set(h.factoryCode, h.factory); });
+    Config.get().factories.forEach(f => { if (!facNames.has(f.code)) facNames.set(f.code, f.name); });
+    const pass = h => (!st.type || h.type === st.type) && (!st.user || h.user === st.user) && (!st.factory || h.factoryCode === st.factory)
+      && (!st.status || (st.status === 'done' ? h.status === 'done' : h.status !== 'done'));
+    const inYear = all.filter(h => h.date.startsWith(st.year) && pass(h));
     const list = inYear.filter(h => !st.month || h.date.slice(5, 7) === st.month);
     const byMonth = Array.from({ length: 12 }, (_, m) => {
       const mm = String(m + 1).padStart(2, '0');
@@ -1482,6 +1521,13 @@
     const done = list.filter(h => h.status === 'done');
     const issues = list.reduce((a, h) => a + ((h.stats || {}).diff || 0) + ((h.stats || {}).fail || 0), 0);
     const people = [...new Set(list.map(h => h.user))];
+    // Bảng theo chi nhánh: số lần kiểm, lần gần nhất, ai đã kiểm
+    const facMap = new Map();
+    list.forEach(h => { const k = h.factoryCode || h.factory; if (!facMap.has(k)) facMap.set(k, []); facMap.get(k).push(h); });
+    const facRows = [...facMap].map(([code, hs]) => ({ code, name: facNames.get(code) || hs[0].factory, n: hs.length, done: hs.filter(h => h.status === 'done').length,
+      issues: hs.reduce((a, h) => a + ((h.stats || {}).diff || 0) + ((h.stats || {}).fail || 0), 0), last: hs.slice().sort((a, b) => b.date.localeCompare(a.date))[0],
+      people: [...new Set(hs.map(h => h.user))] })).sort((a, b) => b.n - a.n);
+    const facMax = Math.max(1, ...facRows.map(r => r.n));
     const admin = Auth.can.deleteHistory();
     const C = TYPE_COLORS;
     const short = k => ({ branch: 'Chi nhánh', meat: 'Meat', supplies: 'Spare part / Supplies', package: 'Package / Ingredient' })[k];
@@ -1563,11 +1609,23 @@
       </div>
 
       <div class="chips">
-        <button class="chip ${!st.type ? 'on' : ''}" data-t="">Tất cả</button>
+        <button class="chip ${!st.type ? 'on' : ''}" data-t="">Tất cả loại kiểm</button>
         ${Object.keys(TYPES).map(k => `<button class="chip ${st.type === k ? 'on' : ''}" data-t="${k}"><i style="background:${C[k]}"></i>${short(k)}</button>`).join('')}
       </div>
-      <div class="row gap">
-        <select id="du"><option value="">Tất cả kế toán</option>${users.map(u => `<option ${u === st.user ? 'selected' : ''}>${E(u)}</option>`).join('')}</select>
+      <div class="card">
+        <div class="filters">
+          <label>Tháng<select id="dm"><option value="">Cả năm ${E(st.year)}</option>${byMonth.map(b => `<option value="${b.mm}" ${b.mm === st.month ? 'selected' : ''}>Tháng ${Number(b.mm)}${b.n ? ` (${b.n})` : ''}</option>`).join('')}</select></label>
+          <label>Trạng thái<select id="dst"><option value="">Tất cả</option><option value="done" ${st.status === 'done' ? 'selected' : ''}>Hoàn tất</option><option value="counting" ${st.status === 'counting' ? 'selected' : ''}>Đang kiểm</option></select></label>
+          <label>Chi nhánh<select id="dfac"><option value="">Tất cả chi nhánh</option>${[...facNames].sort((a, b) => a[1].localeCompare(b[1], 'vi')).map(([k, n]) => `<option value="${E(k)}" ${k === st.factory ? 'selected' : ''}>${E(n)}</option>`).join('')}</select></label>
+          <label>Người kiểm<select id="du"><option value="">Tất cả kế toán</option>${users.map(u => `<option ${u === st.user ? 'selected' : ''}>${E(u)}</option>`).join('')}</select></label>
+        </div>
+        ${(st.month || st.status || st.factory || st.user || st.type) ? `<div class="filter-tags">
+          ${st.type ? `<button class="ftag" data-clr="type">${short(st.type)} ✕</button>` : ''}
+          ${st.month ? `<button class="ftag" data-clr="month">Tháng ${Number(st.month)} ✕</button>` : ''}
+          ${st.status ? `<button class="ftag" data-clr="status">${st.status === 'done' ? 'Hoàn tất' : 'Đang kiểm'} ✕</button>` : ''}
+          ${st.factory ? `<button class="ftag" data-clr="factory">${E(facNames.get(st.factory) || st.factory)} ✕</button>` : ''}
+          ${st.user ? `<button class="ftag" data-clr="user">${E(st.user)} ✕</button>` : ''}
+          <button class="ftag clear" data-clr="all">Bỏ tất cả bộ lọc</button></div>` : ''}
       </div>
 
       <div class="card">
@@ -1586,6 +1644,17 @@
         <h3>Lịch đi kiểm theo kế toán · ${periodLabel}</h3>
         <div class="lane-wrap">${grid}</div>
         <div class="legend small">${Object.keys(TYPES).map(k => `<span><i style="background:${C[k]}"></i>${short(k)}</span>`).join('')}</div>
+      </div>
+
+      <div class="card">
+        <h3>Theo chi nhánh · ${periodLabel}</h3>
+        ${facRows.length ? `<table class="fac-tbl"><thead><tr><th>Chi nhánh</th><th class="num">Lần</th><th>Gần nhất</th><th>Người kiểm</th></tr></thead><tbody>
+          ${facRows.map(r => `<tr class="click" data-fac="${E(r.code)}">
+            <td><b>${E(r.name)}</b><div class="muted small">${E(r.code)} · ${r.done}/${r.n} hoàn tất${r.issues ? ` · <span class="short">${r.issues} lệch/KĐ</span>` : ''}</div><div class="mini-bar"><i style="width:${r.n / facMax * 100}%"></i></div></td>
+            <td class="num">${r.n}</td>
+            <td class="small">${Util.vnDate(r.last.date)}<div class="muted">${E(r.last.user)}</div></td>
+            <td><div class="ava-stack">${r.people.map(u => `<span class="ava sm" title="${E(u)}">${E(initials(u))}</span>`).join('')}</div></td>
+          </tr>`).join('')}</tbody></table><p class="muted small">Bấm vào chi nhánh để lọc.</p>` : '<p class="muted small">Không có lần kiểm nào.</p>'}
       </div>
 
       <h3 class="section">Dòng thời gian · ${periodLabel}</h3>
@@ -1607,6 +1676,11 @@
     const upd = (k, v) => { st[k] = v; if (k === 'year') { st.month = ''; return renderDashboard(); } drawDashboard(own, cloudList, cloudState, cloudAt); };
     $('#dy').onchange = e => upd('year', e.target.value);
     $('#du').onchange = e => upd('user', e.target.value);
+    $('#dm').onchange = e => upd('month', e.target.value);
+    $('#dst').onchange = e => upd('status', e.target.value);
+    $('#dfac').onchange = e => upd('factory', e.target.value);
+    $$('[data-fac]').forEach(r => r.onclick = () => upd('factory', st.factory === r.dataset.fac ? '' : r.dataset.fac));
+    $$('[data-clr]').forEach(b => b.onclick = () => { if (b.dataset.clr === 'all') { st.type = st.month = st.status = st.factory = st.user = ''; drawDashboard(own, cloudList, cloudState, cloudAt); } else upd(b.dataset.clr, ''); });
     $$('.chip').forEach(c => c.onclick = () => upd('type', c.dataset.t));
     $$('.mcol').forEach(c => c.onclick = () => upd('month', st.month === c.dataset.m ? '' : c.dataset.m));
     $$('.gc.heat[data-m]').forEach(c => c.onclick = () => upd('month', c.dataset.m));
@@ -1952,6 +2026,7 @@
     const setHdr = () => document.documentElement.style.setProperty('--hdr', ($('header').offsetHeight - 1) + 'px');
     setHdr(); window.addEventListener('resize', setHdr);
     $('#settingsBtn').onclick = () => go('#settings');
+    $('#hdrLogo').onclick = () => go('#home');
     $('#net').onclick = () => guard(async () => { const r = await OneDrive.flushOutbox(); toast(`Đã gửi ${r.sent}, còn chờ ${r.pending}`); refreshNet(); }, 'Đang đồng bộ...');
     await loadDefaultAssets();
     try { await Auth.init(); } catch (e) { toast(e.message, 'err'); }

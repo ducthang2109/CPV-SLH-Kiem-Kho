@@ -1,6 +1,6 @@
 {
-  "name": "CPV SLH Kiem Kho",
-  "short_name": "CPV SLH Kiem Kho",
+  "name": "CPV SLH Kiểm Kê",
+  "short_name": "CPV SLH Kiểm Kê",
   "description": "Kiểm kê hàng tồn kho offline cho kế toán",
   "start_url": "./",
   "scope": "./",

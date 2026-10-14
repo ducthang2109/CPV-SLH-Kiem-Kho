@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0a7a3c">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="CPV SLH Kiem Kho">
-  <title>CPV SLH Kiem Kho</title>
+  <meta name="apple-mobile-web-app-title" content="CPV SLH Kiểm Kê">
+  <title>CPV SLH Kiểm Kê</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -15,13 +15,14 @@
 <body>
   <header>
     <button id="back" class="icon" hidden aria-label="Quay lại">‹</button>
-    <h1 id="title">CPV SLH Kiem Kho</h1>
+    <img src="assets/cp-mark.png" class="hdr-logo" alt="C.P" id="hdrLogo">
+    <h1 id="title">CPV SLH Kiểm Kê</h1>
     <span id="net" class="online" title="Bấm để đồng bộ">Online</span>
     <button id="settingsBtn" class="icon" aria-label="Cài đặt">⚙</button>
   </header>
   <main id="view"></main>
 
-  <script>window.APP_VERSION = '2.2.0';</script>
+  <script>window.APP_VERSION = '2.3.0';</script>
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="vendor/pdfmake.min.js"></script>
   <script src="vendor/vfs_fonts.js"></script>
