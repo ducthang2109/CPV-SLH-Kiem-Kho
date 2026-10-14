@@ -109,13 +109,18 @@ const Auth = (function () {
     setUser({ email: account.username, name: account.name || account.username, provider: 'microsoft' });
   }
 
-  function setUser(u) {
+  // remember = false: chỉ nhớ đến khi đóng trình duyệt (sessionStorage)
+  function setUser(u, remember) {
     u.loginAt = new Date().toISOString();
-    localStorage.setItem(USER_KEY, JSON.stringify(u));
+    u.appVersion = window.APP_VERSION;
+    localStorage.removeItem(USER_KEY); sessionStorage.removeItem(USER_KEY);
+    (remember === false ? sessionStorage : localStorage).setItem(USER_KEY, JSON.stringify(u));
+    if (u.email) localStorage.setItem('kk_last_email', u.email);
   }
+  const lastEmail = () => localStorage.getItem('kk_last_email') || '';
 
   function currentUser() {
-    try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { return null; }
+    try { return JSON.parse(localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY)); } catch (e) { return null; }
   }
 
   async function loginMicrosoft() {
@@ -123,12 +128,12 @@ const Auth = (function () {
     await msalApp.loginRedirect({ scopes: Config.get().msal.scopes, prompt: 'select_account' });
   }
 
-  async function loginLocal(email, password) {
+  async function loginLocal(email, password, remember) {
     email = String(email).trim().toLowerCase();
     const u = Config.get().localUsers.find(x => x.email === email);
     if (!u || u.hash !== await Util.sha256(email + '|' + password)) throw new Error('Sai email hoặc mật khẩu');
     const role = roleOf(u);
-    setUser({ email, name: u.name, provider: 'local', admin: role === 'admin', role });
+    setUser({ email, name: u.name, provider: 'local', admin: role === 'admin', role }, remember);
   }
 
   // Phân quyền: admin = quản trị (cài đặt, tài khoản, xóa lịch sử); accountant = kế toán đi kiểm; viewer = chỉ xem dashboard / file
@@ -173,7 +178,7 @@ const Auth = (function () {
     const local = Config.get().localUsers.find(x => x.email === u.email);
     if (!local) { localStorage.removeItem(USER_KEY); return false; }
     u.role = roleOf(local); u.admin = u.role === 'admin'; u.name = local.name;
-    localStorage.setItem(USER_KEY, JSON.stringify(u));
+    (localStorage.getItem(USER_KEY) ? localStorage : sessionStorage).setItem(USER_KEY, JSON.stringify(u));
     return true;
   }
 
@@ -181,8 +186,16 @@ const Auth = (function () {
     Config.save({ localUsers: Config.get().localUsers.filter(x => x.email !== email) });
   }
 
+  // Bản app mới yêu cầu đăng nhập lại: phiên đăng nhập tạo trước bản FORCE_RELOGIN_VERSION bị đăng xuất (chỉ trên máy, không ảnh hưởng dữ liệu)
+  const ver = v => String(v || '0').split('.').map(n => parseInt(n, 10) || 0).reduce((a, n) => a * 1000 + n, 0);
+  function needsRelogin() {
+    const u = currentUser();
+    return !!(u && window.FORCE_RELOGIN_VERSION && ver(u.appVersion) < ver(window.FORCE_RELOGIN_VERSION));
+  }
+  function logoutLocal() { localStorage.removeItem(USER_KEY); sessionStorage.removeItem(USER_KEY); }
+
   function logout() {
-    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(USER_KEY); sessionStorage.removeItem(USER_KEY);
     if (msalApp && navigator.onLine) {
       const acc = msalApp.getActiveAccount();
       if (acc) msalApp.logoutRedirect({ account: acc, postLogoutRedirectUri: location.origin + location.pathname });
@@ -202,5 +215,5 @@ const Auth = (function () {
     }
   }
 
-  return { init, useMicrosoft, currentUser, loginMicrosoft, loginLocal, addLocalUser, removeLocalUser, setRole, role, roleOf, can, refreshUser, ROLES, logout, getToken, domainAllowed };
+  return { init, useMicrosoft, currentUser, lastEmail, needsRelogin, logoutLocal, loginMicrosoft, loginLocal, addLocalUser, removeLocalUser, setRole, role, roleOf, can, refreshUser, ROLES, logout, getToken, domainAllowed };
 })();

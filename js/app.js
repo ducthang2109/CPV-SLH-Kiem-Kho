@@ -48,53 +48,76 @@
   window.addEventListener('offline', refreshNet);
 
   // ---------- đăng nhập ----------
+  // Bước 1 bắt buộc: kết nối dữ liệu chung bằng mã kết nối (máy đã kết nối thì nhớ mã, không hỏi lại).
+  // Bước 2: email + mật khẩu, có "Ghi nhớ đăng nhập" để lần sau vào thẳng app.
   function renderLogin() {
     setTitle('Đăng nhập');
     const cfg = Config.get();
-    const ms = Auth.useMicrosoft();
+    const connected = Cloud.enabled();
+    const ms = connected && Auth.useMicrosoft();
     const noUsers = !cfg.localUsers.length;
+    const lastEmail = Auth.lastEmail();
+    const step = (n, title, on, done) => `<div class="lstep ${on ? 'on' : ''} ${done ? 'done' : ''}"><span>${done ? '✓' : n}</span>${title}</div>`;
     view().innerHTML = `
       <div class="card center-card">
-        <img src="icons/icon-192.png" class="logo" alt="">
+        <img src="assets/cp-mark.png" class="logo login-logo" alt="C.P">
         <h2>CPV SLH Kiểm Kê</h2>
         <p class="muted">${E(cfg.companyName)}</p>
-        ${ms ? `<button class="btn primary block" id="msLogin">Đăng nhập tài khoản Microsoft công ty</button>
-                <p class="muted small">Chỉ chấp nhận email: ${E((cfg.allowedDomains || []).join(', ') || 'mọi tên miền')}</p>` : ''}
-        ${!ms && noUsers ? `
-          <h3>Tạo tài khoản quản trị đầu tiên</h3>
+        <div class="lsteps">${step(1, 'Kết nối dữ liệu chung', !connected, connected)}${step(2, 'Đăng nhập tài khoản', connected, false)}</div>
+      </div>
+      ${!connected ? `
+      <div class="card">
+        <h3>Bước 1: Nhập mã kết nối</h3>
+        <p class="small">Nhập <b>mã kết nối</b> quản trị viên gửi riêng cho bạn (bắt đầu bằng <b>KK1.</b>). Chỉ cần nhập <b>một lần</b> trên máy này, app sẽ ghi nhớ.</p>
+        <textarea id="ccode" rows="3" placeholder="Dán mã kết nối KK1..." autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+        <button class="btn primary block" id="cconnect">Kết nối</button>
+        <details class="small admin-setup">
+          <summary>Quản trị viên thiết lập lần đầu bằng token GitHub</summary>
+          <label class="small">Repo dữ liệu (Private)<input id="crepo" value="ducthang2109/CPV-SLH-Kiem-Kho-Data"></label>
+          <p class="muted small">Dán token GitHub (github_pat_...) vào ô mã kết nối phía trên rồi bấm Kết nối.</p>
+        </details>
+      </div>
+      <div class="card disabled-card">
+        <h3>Bước 2: Đăng nhập</h3>
+        <p class="muted small">Kết nối xong mới nhập được email và mật khẩu.</p>
+        <input type="email" placeholder="Email công ty" disabled>
+        <input type="password" placeholder="Mật khẩu" disabled>
+      </div>` : `
+      <div class="card">
+        <h3>Bước 2: Đăng nhập</h3>
+        ${ms ? `<button class="btn primary block" id="msLogin">Đăng nhập tài khoản Microsoft công ty</button><div class="sep">hoặc tài khoản nội bộ</div>` : ''}
+        ${noUsers ? `
+          <p class="small">Dữ liệu chung chưa có tài khoản nào: tạo tài khoản quản trị đầu tiên.</p>
           <input id="email" type="email" placeholder="Email công ty" autocomplete="username">
           <input id="name" placeholder="Họ và tên">
           <input id="pw" type="password" placeholder="Mật khẩu" autocomplete="new-password">
-          <button class="btn primary block" id="create">Tạo tài khoản</button>
-          <p class="muted small">Muốn dùng tài khoản Microsoft 365 + OneDrive? Nhập Client ID trong <a href="#settings">Cài đặt</a>.</p>` : ''}
-        ${!noUsers ? `
-          ${ms ? '<div class="sep">hoặc tài khoản nội bộ</div>' : ''}
-          <input id="email" type="email" placeholder="Email công ty" autocomplete="username">
-          <input id="pw" type="password" placeholder="Mật khẩu" autocomplete="current-password">
-          <button class="btn ${ms ? '' : 'primary'} block" id="local">Đăng nhập</button>` : ''}
-      </div>
-      ${Cloud.enabled() ? `<p class="muted small center">☁ Đã kết nối dữ liệu chung · <a href="#" id="resync">Cập nhật tài khoản</a></p>` : `
-      <div class="card">
-        <h3>☁ Máy mới? Kết nối dữ liệu chung</h3>
-        <p class="small">Nhập <b>mã kết nối</b> quản trị viên gửi riêng cho bạn. App tải về tài khoản, danh sách nhà máy và lịch sử kiểm dùng chung, không phải tạo tài khoản lại.</p>
-        <input id="ccode" placeholder="Mã kết nối (bắt đầu bằng KK1.)" autocomplete="off">
-        <button class="btn block" id="cconnect">Kết nối</button>
+          <button class="btn primary block" id="create">Tạo tài khoản</button>` : `
+          <form id="lform" autocomplete="on">
+            <input id="email" name="email" type="email" placeholder="Email công ty" autocomplete="username" value="${E(lastEmail)}">
+            <input id="pw" name="password" type="password" placeholder="Mật khẩu" autocomplete="current-password">
+            <label class="row gap small remember"><input type="checkbox" id="remember" checked> Ghi nhớ đăng nhập trên máy này</label>
+            <button class="btn ${ms ? '' : 'primary'} block" id="local" type="submit">Đăng nhập</button>
+          </form>`}
+        <p class="muted small center">☁ Đã kết nối dữ liệu chung (${E(Cloud.settings().repo.split('/').pop())}) · <a href="#" id="resync">Cập nhật tài khoản</a> · <a href="#" id="cchange">Đổi mã kết nối</a></p>
       </div>`}`;
     const ok = () => go('#home');
     if ($('#cconnect')) $('#cconnect').onclick = () => guard(async () => {
-      const r = await Cloud.connect($('#ccode').value);
-      toast(r.created ? 'Đã kết nối, dữ liệu chung đang trống' : `Đã tải ${r.users} tài khoản, ${r.factories} nhà máy`);
+      const code = $('#ccode').value.trim();
+      if (!code) throw new Error('Nhập mã kết nối quản trị viên gửi cho bạn');
+      const r = await Cloud.connect(code, $('#crepo') ? $('#crepo').value : '');
+      toast(r.created ? 'Đã kết nối, dữ liệu chung đang trống' : `Đã kết nối: ${r.users} tài khoản, ${r.factories} nhà máy`);
       renderLogin();
+      if ($('#email') && !$('#email').value) $('#email').focus(); else if ($('#pw')) $('#pw').focus();
     }, 'Đang kết nối dữ liệu chung...');
     if ($('#resync')) $('#resync').onclick = e => { e.preventDefault(); guard(async () => { const r = await Cloud.pullConfig(); toast(`Đã cập nhật ${r.users || 0} tài khoản`); renderLogin(); }, 'Đang tải tài khoản...'); };
+    if ($('#cchange')) $('#cchange').onclick = e => { e.preventDefault(); if (confirm('Nhập mã kết nối khác cho máy này?')) { Cloud.disconnect(); renderLogin(); } };
     $('#msLogin') && ($('#msLogin').onclick = () => guard(Auth.loginMicrosoft, 'Đang mở trang đăng nhập Microsoft...'));
     $('#create') && ($('#create').onclick = () => guard(async () => {
       await Auth.addLocalUser($('#email').value, $('#name').value, $('#pw').value, true);
-      await Auth.loginLocal($('#email').value, $('#pw').value); ok();
+      await Auth.loginLocal($('#email').value, $('#pw').value, true); ok();
     }));
-    $('#local') && ($('#local').onclick = () => guard(async () => { await Auth.loginLocal($('#email').value, $('#pw').value); ok(); }));
+    if ($('#lform')) $('#lform').onsubmit = e => { e.preventDefault(); guard(async () => { await Auth.loginLocal($('#email').value, $('#pw').value, $('#remember').checked); ok(); }); };
   }
-
   // ---------- trang đầu: chọn loại kiểm ----------
   const TYPES = {
     branch: { icon: '🏭', name: 'Kiểm tra chi nhánh', desc: 'Checklist Đạt / Không đạt theo mẫu kiểm tra nhà máy, kèm ảnh và ký xác nhận' },
@@ -1993,6 +2016,8 @@
     const [page, arg] = location.hash.replace(/^#/, '').split('/');
     const user = Auth.currentUser();
     if (page === 'settings') return renderSettings();
+    // Bắt buộc kết nối dữ liệu chung: máy chưa kết nối thì về màn hình đăng nhập (bước nhập mã)
+    if (user && !Cloud.enabled()) { Auth.logoutLocal(); return renderLogin(); }
     if (!user) return renderLogin();
     window.scrollTo(0, 0);
     // Tài khoản chỉ xem không vào các màn hình kiểm kê
@@ -2022,6 +2047,13 @@
     } catch (e) { console.warn('syncCloud', e); if (showToast) toast(e.message, 'err'); }
   }
 
+  let updatePending = false;
+  async function applyUpdate() {
+    toast('Đang cập nhật phiên bản mới...');
+    try { if (current) await DB.put('sessions', current); } catch (e) { /* bỏ qua */ }
+    setTimeout(() => location.reload(), 900);
+  }
+
   async function boot() {
     const setHdr = () => document.documentElement.style.setProperty('--hdr', ($('header').offsetHeight - 1) + 'px');
     setHdr(); window.addEventListener('resize', setHdr);
@@ -2030,7 +2062,9 @@
     $('#net').onclick = () => guard(async () => { const r = await OneDrive.flushOutbox(); toast(`Đã gửi ${r.sent}, còn chờ ${r.pending}`); refreshNet(); }, 'Đang đồng bộ...');
     await loadDefaultAssets();
     try { await Auth.init(); } catch (e) { toast(e.message, 'err'); }
-    window.addEventListener('hashchange', route);
+    // Bản mới yêu cầu đăng nhập lại một lần (đi qua bước nhập mã kết nối nếu máy chưa kết nối)
+    if (Auth.needsRelogin()) { Auth.logoutLocal(); setTimeout(() => toast('App đã cập nhật phiên bản ' + window.APP_VERSION + ', vui lòng đăng nhập lại'), 300); }
+    window.addEventListener('hashchange', () => { if (updatePending && !location.hash.startsWith('#review')) return applyUpdate(); route(); });
     window.addEventListener('pagehide', () => current && DB.put('sessions', current));
     refreshNet();
     route();
@@ -2039,14 +2073,22 @@
     if (Util.inAppBrowser) toast('Đang mở trong Zalo/Facebook/Teams: hãy mở bằng Chrome/Safari để tải và chia sẻ được file', 'err');
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       const hadController = !!navigator.serviceWorker.controller;
-      navigator.serviceWorker.register('sw.js').then(reg => reg.update()).catch(e => console.warn('SW', e));
-      // Có bản mới: hiện nút cập nhật (không tự tải lại để không mất chữ ký đang ký dở)
+      navigator.serviceWorker.register('sw.js').then(reg => {
+        reg.update();
+        // Kiểm tra bản mới mỗi khi mở lại app và mỗi 30 phút
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+        setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+      }).catch(e => console.warn('SW', e));
+      // Có bản mới: tự cập nhật trên mọi máy. Đang ở màn hình ký thì chờ rời màn hình đó (không mất chữ ký đang ký dở)
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!hadController || $('#updbar')) return;
+        if (!hadController || updatePending) return;
+        updatePending = true;
+        const page = location.hash.replace(/^#/, '').split('/')[0];
+        if (page !== 'review') return applyUpdate();
         const b = document.createElement('div');
         b.id = 'updbar'; b.className = 'updbar';
-        b.innerHTML = 'Đã có phiên bản mới của app. <button class="btn small-btn">Cập nhật</button>';
-        b.querySelector('button').onclick = async () => { if (current) await DB.put('sessions', current); location.reload(); };
+        b.innerHTML = 'Đã có phiên bản mới, app sẽ tự cập nhật khi rời màn hình ký. <button class="btn small-btn">Cập nhật ngay</button>';
+        b.querySelector('button').onclick = applyUpdate;
         document.body.appendChild(b);
       });
     }
