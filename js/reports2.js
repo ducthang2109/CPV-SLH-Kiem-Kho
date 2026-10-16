@@ -178,7 +178,7 @@ const Docs2 = (function () {
       bg(TEAL), leaves(),
       logo ? { canvas: [{ type: 'rect', x: 0, y: 0, w: 230, h: 76, r: 8, color: '#ffffff' }], absolutePosition: { x: 50, y: 50 } } : '',
       logo ? { image: 'logo', fit: [210, 60], absolutePosition: { x: 60, y: 58 } } : '',
-      { text: 'Check Warehouse', color: '#fff', bold: true, fontSize: 30, absolutePosition: { x: 50, y: 175 } },
+      { text: 'Báo cáo kiểm kê kho', color: '#fff', bold: true, fontSize: 30, absolutePosition: { x: 50, y: 175 } },
       { text: groups.map(([, l]) => whTitle(l)).join(' & '), color: '#fff', bold: true, fontSize: 22, absolutePosition: { x: 50, y: 220 }, width: 520 },
       { text: (s.factory.shortName || s.factory.name).toUpperCase(), color: '#fff', bold: true, fontSize: 16, absolutePosition: { x: 70, y: 430 } },
       { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 420, y2: 0, lineWidth: 3, lineColor: '#fff' }], absolutePosition: { x: 64, y: 458 } },
@@ -193,12 +193,12 @@ const Docs2 = (function () {
     ], margin: [10, 8, 10, 8] }]] }, layout: { hLineWidth: () => 0, vLineWidth: i => i === 0 ? 4 : 0, vLineColor: () => color || GREEN, fillColor: () => '#f7f9fb' } });
     content.push({ margin: [0, 50, 0, 0], columns: [
       card('Số kho đã kiểm', String(groups.length), groups.map(([, l]) => l[0].warehouseCode).join(' · ')),
-      card('Mã hàng đã kiểm', `${counted.length}/${s.items.length}`, 'dòng đã đếm / tổng dòng', counted.length === s.items.length ? GREEN : '#e65100'),
-      card('Độ chính xác', Util.fmt(acc) + '%', `${counted.length - diff.length} dòng khớp sổ sách`, acc >= 98 ? GREEN : acc >= 95 ? '#e65100' : RED),
-      card('Dòng chênh lệch', String(diff.length), diff.length ? (diffValue != null ? 'Giá trị lệch: ' + Q(diffValue) + ' đ' : 'xem bảng chi tiết') : 'Không có chênh lệch', diff.length ? RED : GREEN)
+      card('Đã kiểm', `${counted.length}/${s.items.length}`, 'dòng đã đếm / tổng số dòng', counted.length === s.items.length ? GREEN : '#e65100'),
+      card('Tỉ lệ khớp sổ', Util.fmt(acc) + '%', `${counted.length - diff.length} dòng khớp sổ`, acc >= 98 ? GREEN : acc >= 95 ? '#e65100' : RED),
+      card('Dòng lệch sổ', String(diff.length), diff.length ? (diffValue != null ? 'Giá trị lệch: ' + Q(diffValue) + ' đ' : 'xem bảng bên dưới') : 'Không có dòng lệch', diff.length ? RED : GREEN)
     ], columnGap: 12 });
     content.push({ margin: [0, 16, 0, 0], table: { headerRows: 1, widths: ['*', 70, 70, 80, 80, 80], body: [
-      ['Kho', 'Số dòng', 'Đã kiểm', 'SL sổ sách', 'SL thực tế', 'Chênh lệch'].map(t => ({ text: t, bold: true, color: '#fff', fillColor: GREEN })),
+      ['Kho', 'Số dòng', 'Đã kiểm', 'SL sổ', 'SL thực tế', 'Lệch'].map(t => ({ text: t, bold: true, color: '#fff', fillColor: GREEN })),
       ...groups.map(([wh, l]) => {
         const c = l.filter(i => i.actualQty != null);
         const d = c.reduce((a, i) => a + variance(i), 0);
@@ -209,27 +209,27 @@ const Docs2 = (function () {
       })
     ] }, layout: { hLineWidth: () => 0.5, vLineWidth: () => 0, hLineColor: () => LINE, paddingTop: () => 4, paddingBottom: () => 4 }, fontSize: 9.5 });
     if (diff.length) {
-      content.push({ text: 'Dòng chênh lệch', bold: true, color: RED, margin: [0, 12, 0, 4] });
+      content.push({ text: 'Dòng lệch sổ', bold: true, color: RED, margin: [0, 12, 0, 4] });
       content.push({ table: { headerRows: 1, widths: [70, '*', 40, 60, 60, 60, 140], body: [
-        ['Mã', 'Tên', 'ĐVT', 'Sổ sách', 'Thực tế', 'CL', 'Ghi chú'].map(t => ({ text: t, bold: true, color: '#fff', fillColor: RED })),
+        ['Mã', 'Tên', 'ĐVT', 'Sổ', 'Thực tế', 'Lệch', 'Ghi chú'].map(t => ({ text: t, bold: true, color: '#fff', fillColor: RED })),
         ...diff.slice(0, 12).map(i => [i.code, nameText(i), i.unit, { text: Q(i.sysQty), alignment: 'right' }, { text: Q(i.actualQty), alignment: 'right' }, { text: D(variance(i)), alignment: 'right', bold: true }, i.note || ''])
       ] }, layout: { hLineWidth: () => 0.5, vLineWidth: () => 0, hLineColor: () => LINE }, fontSize: 8.5 });
     }
 
     // 3. Biên bản theo kho
-    content.push(...divider('01', 'CHECK\nWAREHOUSE'));
+    content.push(...divider('01', 'BIÊN BẢN\nTỪNG KHO'));
     groups.forEach(([wh, l]) => {
       const imgs = (opts.whImages || {})[wh] || [];
       const pick = imgs.length > 2 ? [imgs[0], imgs[imgs.length - 1]] : imgs;
-      content.push(titleBar('Warehouse – ' + whTitle(l)));
+      content.push(titleBar('Kho – ' + whTitle(l)));
       content.push({ margin: [0, 62, 0, 0], columns: pick.length ? pick.map(img => ({ width: '*', image: img, fit: [(W - 2 * M - 14) / 2, H - 175], alignment: 'center' }))
-        : [{ text: 'Xem file biên bản kiểm kê kèm theo.', italics: true, color: MUTED }], columnGap: 14 });
+        : [{ text: 'Xem file biên bản gửi kèm.', italics: true, color: MUTED }], columnGap: 14 });
     });
 
     // 4. Hình ảnh kiểm kho theo kho
-    content.push(...divider('02', 'CHECKING\nWAREHOUSE\nIMAGES'));
+    content.push(...divider('02', 'ẢNH\nKIỂM KHO'));
     const photoSlide = (caption, photos) => {
-      content.push(titleBar('Checking warehouse images'));
+      content.push(titleBar('Ảnh kiểm kho'));
       content.push({ margin: [0, 62, 0, 6], columns: [{ width: 34, canvas: [{ type: 'rect', x: 0, y: 6, w: 22, h: 8, color: '#4472c4' }, { type: 'polyline', closePath: true, points: [{ x: 20, y: 0 }, { x: 34, y: 10 }, { x: 20, y: 20 }], color: '#4472c4' }] },
         { width: '*', text: caption, fontSize: 14, margin: [8, 0, 0, 0] }] });
       const w = (W - 2 * M - 16) / 3;
@@ -238,18 +238,18 @@ const Docs2 = (function () {
     groups.forEach(([wh, l]) => {
       const photos = [].concat(...l.map(i => i.photos || []), ...(s.generalPhotos || []).filter(g => g.wh === wh).map(g => g.data));
       for (let i = 0; i < Math.max(photos.length, 1) && i < 9; i += 3) {
-        photoSlide(`Hàng hóa của kho ${whTitle(l)} & Hình ảnh kiểm đếm hàng hóa`, photos.slice(i, i + 3));
+        photoSlide(`Kho ${whTitle(l)}: ảnh hàng hóa lúc kiểm đếm`, photos.slice(i, i + 3));
         if (!photos.length) content.push({ text: 'Chưa có ảnh cho kho này.', italics: true, color: MUTED, margin: [0, 20, 0, 0] });
       }
     });
     const common = [s.checkIn && s.checkIn.data, s.checkOut && s.checkOut.data, ...(s.generalPhotos || []).filter(g => !g.wh).map(g => g.data)].filter(Boolean);
-    if (common.length) for (let i = 0; i < common.length; i += 3) photoSlide('Hình ảnh xác nhận có mặt & hiện trường kiểm kê', common.slice(i, i + 3));
+    if (common.length) for (let i = 0; i < common.length; i += 3) photoSlide('Ảnh lúc bắt đầu, kết thúc và tại kho', common.slice(i, i + 3));
 
     // 5. Thank You
     content.push({ text: '', pageBreak: 'before' }, bg(TEAL), leaves(),
       logo ? { canvas: [{ type: 'rect', x: 0, y: 0, w: 230, h: 76, r: 8, color: '#ffffff' }], absolutePosition: { x: 50, y: 50 } } : '',
       logo ? { image: 'logo', fit: [210, 60], absolutePosition: { x: 60, y: 58 } } : '',
-      { text: 'Thank You', color: '#fff', bold: true, fontSize: 54, absolutePosition: { x: 60, y: 250 } });
+      { text: 'Xin cảm ơn', color: '#fff', bold: true, fontSize: 54, absolutePosition: { x: 60, y: 250 } });
 
     return {
       pageSize: 'A4', pageOrientation: 'landscape', pageMargins: [M, 30, M, 26], images,
@@ -327,7 +327,7 @@ const Docs2 = (function () {
         for (let k = 0; k < i.photos.length; k += 2) content.push({ columns: i.photos.slice(k, k + 2).map(p => ({ image: p, fit: [255, 200] })), columnGap: 10, margin: [0, 0, 0, 6] });
       });
       if (presence.length) {
-        content.push({ text: 'Ảnh xác nhận có mặt (bắt đầu / kết thúc)', bold: true, fontSize: 9, margin: [0, 8, 0, 3] });
+        content.push({ text: 'Ảnh lúc bắt đầu / kết thúc', bold: true, fontSize: 9, margin: [0, 8, 0, 3] });
         content.push({ columns: presence.map(p => ({ stack: [{ image: p.data, fit: [220, 240] }, { text: `${Stamp.dt(new Date(p.time))} · ${Geo.fmt(p.geo)}`, fontSize: 7.5, color: MUTED }] })), columnGap: 12 });
       }
     }

@@ -6,11 +6,14 @@
 # Chay:  DongBo_KiemKe.ps1            (dong bo 1 lan, dung cho tac vu chay dinh ky)
 #        DongBo_KiemKe.ps1 -Setup     (nhap ma ket noi, cai tac vu 15 phut/lan, dong bo lan dau)
 #        DongBo_KiemKe.ps1 -Uninstall (go tac vu)
-param([switch]$Setup, [switch]$Uninstall, [string]$Root)
+#        DongBo_KiemKe.ps1 -Watch     (chay nen: co file moi trong Input thi day len ngay)
+#        DongBo_KiemKe.ps1 -InstallWatch (chi cai tac vu theo doi Input)
+param([switch]$Setup, [switch]$Uninstall, [switch]$Watch, [switch]$InstallWatch, [string]$Root)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $TaskName = 'CPV SLH Kiem Ke - Dong bo OneDrive'
+$WatchTaskName = 'CPV SLH Kiem Ke - Theo doi Input'
 $Data = Join-Path $env:LOCALAPPDATA 'CPVKiemKe'
 if (-not (Test-Path $Data)) { New-Item -ItemType Directory -Path $Data | Out-Null }
 $CodeFile = Join-Path $Data 'ketnoi.dat'
@@ -48,7 +51,7 @@ function Save-Code($code) {
 function Load-Conn {
   if ($env:CPV_SYNC_CODE) { return Read-Code $env:CPV_SYNC_CODE }
   if (-not (Test-Path $CodeFile)) { return $null }
-  $sec = Get-Content $CodeFile -Raw | ConvertTo-SecureString
+  $sec = (Get-Content $CodeFile -Raw).Trim() | ConvertTo-SecureString
   $code = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
   return Read-Code $code
 }
@@ -85,13 +88,59 @@ function Set-Prop($obj, $name, $value) {
   if ($obj.PSObject.Properties[$name]) { $obj.$name = $value } else { $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value }
 }
 
-function Sync-Once {
+function Get-InputFiles {
+  $local = @()
+  foreach ($f in $InputFiles) { $p = Join-Path $InDir $f; if (Test-Path $p) { $local += Get-Item $p } }
+  foreach ($d in $InputDirs) { $p = Join-Path $InDir $d; if (Test-Path $p) { $local += Get-ChildItem $p -File -Recurse | Where-Object { $_.Name -notlike '~$*' -and $_.Extension -match '^\.(xlsx|xls|pdf|csv)$' } } }
+  return $local
+}
+
+function Sync-Once([switch]$InputOnly) {
   $script:conn = Load-Conn
   if (-not $script:conn) { Log 'Chua co ma ket noi. Chay CaiDat_DongBo.cmd de nhap ma.'; return }
+  # Lan dong bo 15 phut va tac vu theo doi Input khong day Input cung luc (tranh loi 409)
+  $im = New-Object Threading.Mutex($false, 'Global\CPVKiemKeInput')
+  if (-not $im.WaitOne([TimeSpan]::FromMinutes(5))) { throw 'Dang co lan day Input khac chay qua lau' }
+  try {
   $state = Load-State
   $tree = Api 'GET' ('/git/trees/' + $script:conn.branch + '?recursive=1')
   $blobs = @($tree.tree | Where-Object { $_.type -eq 'blob' })
   $remote = @{}; foreach ($b in $blobs) { $remote[$b.path] = $b }
+
+  # ---------- Input: file ton, Master len du lieu chung (chay truoc de app co file moi ngay) ----------
+  $local = Get-InputFiles
+  $sent = 0; $index = @()
+  foreach ($f in $local) {
+    $rel = $f.FullName.Substring($InDir.Length + 1) -replace '\\', '/'
+    $path = 'input/' + $rel
+    $index += [ordered]@{ path = $path; name = $f.Name; folder = $(if ($rel.Contains('/')) { $rel.Substring(0, $rel.LastIndexOf('/')) } else { '' }); size = $f.Length; modified = $f.LastWriteTimeUtc.ToString('o') }
+    if ($f.Length -gt $MaxUpload) { Log ('Bo qua file qua lon: ' + $rel); continue }
+    $bytes = [IO.File]::ReadAllBytes($f.FullName)
+    $sha = Git-Sha $bytes
+    $r = $remote[$path]
+    if ($r -and $r.sha -eq $sha) { continue }
+    $body = @{ message = 'Dong bo Input: ' + $rel; content = [Convert]::ToBase64String($bytes); branch = $script:conn.branch }
+    if ($r) { $body.sha = $r.sha }
+    try { $null = Api 'PUT' ('/contents/' + (Enc-Path $path)) $body; $sent++; Log ('Day len: ' + $rel) } catch { Log ('Loi day ' + $rel + ': ' + $_.Exception.Message) }
+  }
+  # Danh muc file Input (ten, ngay sua) de app chon file moi nhat
+  $idxJson = (@{ updatedAt = (Get-Date).ToUniversalTime().ToString('o'); files = $index } | ConvertTo-Json -Depth 5)
+  $idxBytes = [Text.Encoding]::UTF8.GetBytes($idxJson)
+  $old = $remote['input/_index.json']
+  $oldKey = $state.PSObject.Properties['indexKey']
+  $newKey = ($index | ForEach-Object { $_.path + '|' + $_.size + '|' + $_.modified }) -join ';'
+  if (-not $old -or -not $oldKey -or $oldKey.Value -ne $newKey) {
+    $body = @{ message = 'Danh muc Input'; content = [Convert]::ToBase64String($idxBytes); branch = $script:conn.branch }
+    if ($old) { $body.sha = $old.sha }
+    $null = Api 'PUT' '/contents/input/_index.json' $body
+    Set-Prop $state 'indexKey' $newKey
+  }
+  } finally { $im.ReleaseMutex(); $im.Dispose() }
+  if ($InputOnly) {
+    ($state | ConvertTo-Json -Depth 6) | Set-Content -Path $StateFile -Encoding UTF8
+    if ($sent) { Log ('Xong (theo doi Input): day len ' + $sent + ' file') }
+    return
+  }
 
   # ---------- Output: file ket qua ve OneDrive ----------
   $got = 0
@@ -132,46 +181,49 @@ function Sync-Once {
     Log ('Cap nhat lich su: ' + $rows.Count + ' lan kiem')
   }
 
-  # ---------- Input: file ton, Master len du lieu chung ----------
-  $local = @()
-  foreach ($f in $InputFiles) { $p = Join-Path $InDir $f; if (Test-Path $p) { $local += Get-Item $p } }
-  foreach ($d in $InputDirs) { $p = Join-Path $InDir $d; if (Test-Path $p) { $local += Get-ChildItem $p -File -Recurse | Where-Object { $_.Name -notlike '~$*' -and $_.Extension -match '^\.(xlsx|xls|pdf|csv)$' } } }
-  $sent = 0; $index = @()
-  foreach ($f in $local) {
-    $rel = $f.FullName.Substring($InDir.Length + 1) -replace '\\', '/'
-    $path = 'input/' + $rel
-    $index += [ordered]@{ path = $path; name = $f.Name; folder = $(if ($rel.Contains('/')) { $rel.Substring(0, $rel.LastIndexOf('/')) } else { '' }); size = $f.Length; modified = $f.LastWriteTimeUtc.ToString('o') }
-    if ($f.Length -gt $MaxUpload) { Log ('Bo qua file qua lon: ' + $rel); continue }
-    $bytes = [IO.File]::ReadAllBytes($f.FullName)
-    $sha = Git-Sha $bytes
-    $r = $remote[$path]
-    if ($r -and $r.sha -eq $sha) { continue }
-    $body = @{ message = 'Dong bo Input: ' + $rel; content = [Convert]::ToBase64String($bytes); branch = $script:conn.branch }
-    if ($r) { $body.sha = $r.sha }
-    try { $null = Api 'PUT' ('/contents/' + (Enc-Path $path)) $body; $sent++; Log ('Day len: ' + $rel) } catch { Log ('Loi day ' + $rel + ': ' + $_.Exception.Message) }
-  }
-  # Danh muc file Input (ten, ngay sua) de app chon file moi nhat
-  $idxJson = (@{ updatedAt = (Get-Date).ToUniversalTime().ToString('o'); files = $index } | ConvertTo-Json -Depth 5)
-  $idxBytes = [Text.Encoding]::UTF8.GetBytes($idxJson)
-  $old = $remote['input/_index.json']
-  $oldKey = $state.PSObject.Properties['indexKey']
-  $newKey = ($index | ForEach-Object { $_.path + '|' + $_.size + '|' + $_.modified }) -join ';'
-  if (-not $old -or -not $oldKey -or $oldKey.Value -ne $newKey) {
-    $body = @{ message = 'Danh muc Input'; content = [Convert]::ToBase64String($idxBytes); branch = $script:conn.branch }
-    if ($old) { $body.sha = $old.sha }
-    $null = Api 'PUT' '/contents/input/_index.json' $body
-    Set-Prop $state 'indexKey' $newKey
-  }
-
   Set-Prop $state 'lastRun' (Get-Date).ToString('o')
   ($state | ConvertTo-Json -Depth 6) | Set-Content -Path $StateFile -Encoding UTF8
   Log ('Xong: tai ve ' + $got + ' file, day len ' + $sent + ' file')
 }
 
+function Install-WatchTask {
+  # Tac vu chay an tu luc dang nhap, theo doi thu muc Input va day file moi len ngay
+  $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $action = New-ScheduledTaskAction -Execute $ps -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath + '" -Watch -Root "' + $Root + '"')
+  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+  $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+  Register-ScheduledTask -TaskName $WatchTaskName -Action $action -Trigger $trigger -Settings $settings -Description 'Theo doi thu muc Input, co file moi thi day len du lieu chung app CPV SLH Kiem Ke ngay' -Force | Out-Null
+}
+
 if ($Uninstall) {
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+  Stop-ScheduledTask -TaskName $WatchTaskName -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName $WatchTaskName -Confirm:$false -ErrorAction SilentlyContinue
   Write-Host 'Da go tac vu dong bo.'
   return
+}
+
+if ($InstallWatch) {
+  Install-WatchTask
+  Start-ScheduledTask -TaskName $WatchTaskName
+  Write-Host ('Da cai tac vu "' + $WatchTaskName + '".')
+  return
+}
+
+if ($Watch) {
+  # Kiem tra thu muc Input 5 giay/lan; file thay doi va dung yen 10 giay thi day len (chi Input, khong tai bien ban)
+  $wm = New-Object Threading.Mutex($false, 'Global\CPVKiemKeWatch')
+  if (-not $wm.WaitOne(0)) { return }
+  Log 'Bat dau theo doi thu muc Input'
+  $last = ''; $pending = $true; $changedAt = (Get-Date).AddSeconds(-60)
+  while ($true) {
+    Start-Sleep -Seconds 5
+    try { $key = (Get-InputFiles | ForEach-Object { $_.FullName + '|' + $_.Length + '|' + $_.LastWriteTimeUtc.Ticks }) -join ';' } catch { continue }
+    if ($key -ne $last) { $last = $key; $pending = $true; $changedAt = Get-Date; continue }
+    if (-not $pending -or ((Get-Date) - $changedAt).TotalSeconds -lt 10) { continue }
+    try { Sync-Once -InputOnly; $pending = $false }
+    catch { Log ('LOI (theo doi Input): ' + $_.Exception.Message); $changedAt = (Get-Date).AddSeconds(50) }
+  }
 }
 
 if ($Setup) {
@@ -190,6 +242,9 @@ if ($Setup) {
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($trigger, $trigger2) -Settings $settings -Description 'Dong bo file Output/Input giua OneDrive va du lieu chung app CPV SLH Kiem Ke (15 phut/lan)' -Force | Out-Null
   Write-Host ('Da cai tac vu "' + $TaskName + '" chay 15 phut/lan.') -ForegroundColor Green
+  Install-WatchTask
+  Start-ScheduledTask -TaskName $WatchTaskName
+  Write-Host ('Da cai tac vu "' + $WatchTaskName + '": co file moi trong Input se day len ngay.') -ForegroundColor Green
   Write-Host 'Dang dong bo lan dau...'
 }
 

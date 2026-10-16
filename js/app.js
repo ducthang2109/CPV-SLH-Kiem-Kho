@@ -153,7 +153,7 @@
         </div>`).join('')}
       <div class="card type-card click dash" data-dash>
         <div class="type-no">📊</div>
-        <div><div class="type-name">Dashboard & lịch sử kiểm kho</div><div class="muted small">Theo năm, tháng, timeline từng kế toán</div></div>
+        <div><div class="type-name">Dashboard & lịch sử kiểm kho</div><div class="muted small">Tổng quan, lịch kiểm từng kế toán, file biên bản</div></div>
         <span class="chev">›</span>
       </div>
       ${open.length && canCount ? `<h3 class="section">Phiên đang làm dở (${open.length})</h3>${open.map(s => `
@@ -253,15 +253,15 @@
         <button class="btn primary block" id="od">Tìm và tải file từ OneDrive</button>
         <div id="odList"></div>
       </div>` : ''}
-      <div class="card">
-        <h3>Lấy file qua app OneDrive trên điện thoại</h3>
-        <p class="muted small">${HELP[type]} File chỉ lấy khi bạn bấm, không tự cập nhật.</p>
+      <details class="card" ${Cloud.enabled() ? '' : 'open'}>
+        <summary><b>Cách khác: chọn file trên điện thoại</b></summary>
+        <p class="muted small">${HELP[type]}</p>
         <ul class="small steps">
           <li><b>Android:</b> bấm nút dưới → ☰ → <b>OneDrive</b> → Apps Kiem Kho → Input → chọn file ${E(pattern)}.</li>
           <li><b>iPhone:</b> bấm nút dưới → <b>Chọn tệp</b> → Duyệt → <b>OneDrive</b> → Apps Kiem Kho → Input → chọn file.</li>
         </ul>
-        <label class="btn ${ms ? '' : 'primary'} block">${type === 'package' ? 'Chọn file PDF / Excel' : type === 'supplies' ? 'Chọn file Excel (chọn được nhiều file)' : 'Chọn file Excel'}<input type="file" id="file" hidden ${type === 'supplies' ? 'multiple' : ''} accept="${type === 'package' ? '.pdf,application/pdf,' : ''}.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></label>
-      </div>
+        <label class="btn block">${type === 'package' ? 'Chọn file PDF / Excel' : type === 'supplies' ? 'Chọn file Excel (chọn được nhiều file)' : 'Chọn file Excel'}<input type="file" id="file" hidden ${type === 'supplies' ? 'multiple' : ''} accept="${type === 'package' ? '.pdf,application/pdf,' : ''}.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></label>
+      </details>
       <div id="preview"></div>`;
 
     const parseOne = async (buf, name) => /\.pdf$/i.test(name) ? PdfStock.parse(buf, name) : Importer.parse(buf, name, type === 'meat' ? 'meat' : 'supplies');
@@ -294,7 +294,7 @@
     if ($('#cloudFiles')) Cloud.inputFiles(pattern).then(list => {
       const box = $('#cloudFiles');
       if (!box) return;
-      if (!list.length) { box.innerHTML = '<p class="muted small">Chưa có file phù hợp trên dữ liệu chung. Kiểm tra máy tính đồng bộ đang bật, hoặc chọn file từ OneDrive bên dưới.</p>'; return; }
+      if (!list.length) { box.innerHTML = '<p class="muted small">Chưa có file phù hợp trên dữ liệu chung. Kiểm tra máy tính đồng bộ đang bật, hoặc chọn file trên điện thoại ở mục bên dưới.</p>'; return; }
       const multi = type === 'supplies';
       box.innerHTML = list.slice(0, 12).map((x, i) => `<label class="cfile ${i === 0 ? 'newest' : ''}">
           <input type="${multi ? 'checkbox' : 'radio'}" name="cf" value="${i}" ${i === 0 || (multi && x.folder === list[0].folder && /^\d{4}\.xlsx$/i.test(x.name)) ? 'checked' : ''}>
@@ -897,22 +897,22 @@
     view().innerHTML = `
       <div class="stats">
         <div><b>${sum.counted}/${sum.lines}</b><span>đã kiểm</span></div>
-        <div class="${diff.length ? 'bad' : ''}"><b>${diff.length}</b><span>chênh lệch</span></div>
+        <div class="${diff.length ? 'bad' : ''}"><b>${diff.length}</b><span>lệch sổ</span></div>
         <div class="${sum.expired ? 'bad' : ''}"><b>${sum.expired}</b><span>hết hạn</span></div>
         <div class="${sum.near ? 'warnc' : ''}"><b>${sum.near}</b><span>sắp hết hạn</span></div>
       </div>
       <div class="card small">
         Sổ sách: ${F(sum.sysQty)} SL · ${F(sum.sysWgh)} kg<br>Thực tế: ${F(sum.actQty)} SL · ${F(sum.actWgh)} kg · ${sum.photos} ảnh
       </div>
-      ${todo.length ? `<div class="card warn-card"><b>${todo.length} dòng chưa kiểm</b> (sẽ ghi "chưa KK" trên biên bản)
+      ${todo.length ? `<div class="card warn-card"><b>${todo.length} dòng chưa kiểm</b> (biên bản sẽ ghi "Chưa kiểm")
         <button class="btn small-btn" id="gotodo">Đi kiểm tiếp</button></div>` : ''}
-      ${diff.length ? `<div class="card"><h3>Hàng chênh lệch</h3>${diff.map(i => `<div class="li"><b>${E(i.code)}</b> ${E(i.name)} · lô ${E(i.lot)}<br><span class="${i.var.qty >= 0 ? 'over' : 'short'}">SL ${sg(i.var.qty)} · KL ${sg(i.var.wgh)} kg</span>${i.note ? ' · ' + E(i.note) : ''}${i.photos.length ? ` · 📷${i.photos.length}` : ''}</div>`).join('')}</div>` : ''}
-      ${exp.length ? `<div class="card"><h3>Cảnh báo hạn sử dụng</h3>${exp.map(i => `<div class="li"><b>${E(i.code)}</b> ${E(i.name)} · lô ${E(i.lot)} · HSD ${Util.vnDate(i.exp.expDate)} <span class="badge ${i.exp.status}">${E(i.exp.label)}</span></div>`).join('')}</div>` : ''}
+      ${diff.length ? `<div class="card"><h3>Hàng lệch sổ</h3>${diff.map(i => `<div class="li"><b>${E(i.code)}</b> ${E(i.name)} · lô ${E(i.lot)}<br><span class="${i.var.qty >= 0 ? 'over' : 'short'}">SL ${sg(i.var.qty)} · KL ${sg(i.var.wgh)} kg</span>${i.note ? ' · ' + E(i.note) : ''}${i.photos.length ? ` · 📷${i.photos.length}` : ''}</div>`).join('')}</div>` : ''}
+      ${exp.length ? `<div class="card"><h3>Hàng hết hạn / sắp hết hạn</h3>${exp.map(i => `<div class="li"><b>${E(i.code)}</b> ${E(i.name)} · lô ${E(i.lot)} · HSD ${Util.vnDate(i.exp.expDate)} <span class="badge ${i.exp.status}">${E(i.exp.label)}</span></div>`).join('')}</div>` : ''}
 
       <div class="card">
         <h3>Biên bản</h3>
         <label>Kho (in dưới tiêu đề)<input id="store" value="${E(s.storeTitle || '')}" placeholder="${E(Reports.storeTitle(Object.assign({}, s, { storeTitle: '' })))}"></label>
-        <label>Ý kiến giải quyết số chênh lệch<textarea id="opinion">${E(s.opinion)}</textarea></label>
+        <label>Ý kiến xử lý chênh lệch<textarea id="opinion">${E(s.opinion)}</textarea></label>
         <label>Ghi chú chung<textarea id="gnote">${E(s.generalNote)}</textarea></label>
       </div>
 
@@ -924,11 +924,11 @@
           <label class="btn small-btn">🖼 Chọn ảnh bìa<input type="file" accept="image/*" id="cov" hidden></label>
           ${s.coverPhoto ? '<button class="btn small-btn" id="covrm">Dùng ảnh mặc định của nhà máy</button>' : ''}
         </div>
-        <label>Mục đích<textarea id="tp" placeholder="Mặc định: kiểm kê định kỳ, đối chiếu sổ sách, kiểm tra HSD">${E(tr.purpose || '')}</textarea></label>
+        <label>Mục đích<textarea id="tp" placeholder="Mặc định: kiểm kê định kỳ, đối chiếu sổ, kiểm tra hạn dùng">${E(tr.purpose || '')}</textarea></label>
         <label>Nhận xét, kết luận<textarea id="tc">${E(tr.conclusion || '')}</textarea></label>
         <label>Kiến nghị<textarea id="tk">${E(tr.recommendation || '')}</textarea></label>
         <button class="btn small-btn" id="auto">Gợi ý nội dung từ kết quả</button>
-        <h4>Hình ảnh hiện trường</h4>
+        <h4>Ảnh tại kho</h4>
         ${isQtyType(typeOf(s)) ? `<label class="small">Ảnh của kho<select id="gwh"><option value="">Ảnh chung</option>${[...new Set(s.items.map(i => i.warehouse))].map(w => `<option>${E(w)}</option>`).join('')}</select></label>` : ''}
         <label class="btn small-btn">📷 Thêm ảnh<input type="file" accept="image/*" capture="environment" id="gph" hidden multiple></label>
         <div class="thumbs">${s.generalPhotos.map((p, i) => `<div class="thumb"><img src="${p.data}" alt=""><button data-grm="${i}">×</button></div>`).join('')}</div>
@@ -953,7 +953,7 @@
       </div>
 
       <div class="card">
-        <h3>Ban kiểm kê ký xác nhận</h3>
+        <h3>Người ký biên bản</h3>
         <div id="committee"></div>
         <button class="btn small-btn" id="addm">+ Thêm thành viên</button>
       </div>
@@ -977,17 +977,17 @@
     $('#back2').onclick = () => go('#count/' + id);
     $('#auto').onclick = () => {
       const parts = [`Đã kiểm ${sum.counted}/${sum.lines} dòng hàng tại ${new Set(items.map(i => i.warehouse)).size} kho.`];
-      parts.push(diff.length ? `Có ${diff.length} dòng chênh lệch so với sổ sách (${sum.overLines} thừa, ${sum.shortLines} thiếu).` : 'Số lượng thực tế khớp với sổ sách.');
-      if (sum.expired || sum.near) parts.push(`Có ${sum.expired} dòng hết hạn và ${sum.near} dòng sắp hết hạn.`);
-      if (todo.length) parts.push(`Còn ${todo.length} dòng chưa kiểm được.`);
+      parts.push(diff.length ? `Có ${diff.length} dòng lệch sổ (${sum.overLines} thừa, ${sum.shortLines} thiếu).` : 'Hàng thực tế khớp sổ.');
+      if (sum.expired || sum.near) parts.push(`Có ${sum.expired} dòng hết hạn, ${sum.near} dòng sắp hết hạn.`);
+      if (todo.length) parts.push(`Còn ${todo.length} dòng chưa kiểm.`);
       tr.conclusion = tr.conclusion || parts.join(' ');
       const rec = [];
-      if (diff.length) rec.push('Thủ kho và kế toán đối chiếu chứng từ nhập/xuất, giải trình nguyên nhân chênh lệch và điều chỉnh sổ sách sau khi được phê duyệt.');
-      if (sum.expired) rec.push('Cách ly, lập biên bản xử lý/hủy hàng đã hết hạn.');
-      if (sum.near) rec.push('Ưu tiên xuất bán/sử dụng hàng sắp hết hạn (FEFO).');
-      if (!rec.length) rec.push('Duy trì công tác quản lý kho hiện tại.');
+      if (diff.length) rec.push('Thủ kho và kế toán đối chiếu phiếu nhập/xuất, giải trình lý do lệch, điều chỉnh sổ khi được duyệt.');
+      if (sum.expired) rec.push('Để riêng hàng hết hạn, lập biên bản xử lý hoặc hủy.');
+      if (sum.near) rec.push('Xuất trước hàng sắp hết hạn.');
+      if (!rec.length) rec.push('Giữ cách quản lý kho hiện tại.');
       tr.recommendation = tr.recommendation || rec.join('\n');
-      if (!s.opinion && diff.length) s.opinion = 'Giao thủ kho giải trình nguyên nhân chênh lệch; kế toán điều chỉnh sổ sách theo kết quả kiểm kê sau khi được Giám đốc phê duyệt.';
+      if (!s.opinion && diff.length) s.opinion = 'Thủ kho giải trình lý do lệch; kế toán điều chỉnh sổ theo kết quả kiểm kê sau khi Giám đốc duyệt.';
       scheduleSave(); renderReview(id);
     };
     $('#gph').onchange = async e => {
@@ -1165,7 +1165,7 @@
     const pending = Cloud.queue().includes(s.id) || !s.cloud;
     return `<div class="card small ${pending ? 'warn-card' : 'ok-card'}">${pending
       ? `☁ Chưa lưu lên dữ liệu chung. <button class="btn small-btn" id="cloudNow">Gửi ngay</button>`
-      : `☁ Đã lưu ${(s.cloud && s.cloud.files || []).length} file và lịch sử lên dữ liệu chung${s.cloud ? ' lúc ' + Util.vnDateTime(s.cloud.at) : ''}. Máy khác xem lại được trong Dashboard.`}</div>`;
+      : `☁ Đã lưu ${(s.cloud && s.cloud.files || []).length} file lên dữ liệu chung${s.cloud ? ' lúc ' + Util.vnDateTime(s.cloud.at) : ''}. Máy tính đồng bộ tự đưa file vào OneDrive › Apps Kiem Kho › Output, máy khác xem được trong Dashboard.`}</div>`;
   }
 
   // Ảnh bìa: ảnh chọn riêng cho lần kiểm này, nếu không có thì ảnh mặc định của nhà máy (Cài đặt)
@@ -1269,14 +1269,11 @@
         ${bsum ? `Đánh giá ${bsum.pass.length + bsum.fail.length}/${bsum.all.length} chỉ tiêu · ${bsum.pass.length} đạt · ${bsum.fail.length} không đạt · tỉ lệ đạt ${Util.fmt(bsum.score)}%`
           : `Đã kiểm ${sum.counted}/${sum.lines} dòng · ${sum.overLines} thừa · ${sum.shortLines} thiếu${typeOf(s) === 'meat' ? ` · ${sum.expired} hết hạn · ${sum.near} sắp hết hạn` : ''}`}</p>
       </div>
-      <div class="card od-card">
+      ${ms ? `<div class="card od-card">
         <h3>Lưu vào OneDrive / Output</h3>
-        ${ms ? `<p class="small">Gửi cả 4 file thẳng vào thư mục <b>${E(Config.get().oneDrive.outputFolder)}</b> trên OneDrive.</p>
-          <button class="btn primary block" id="odall">☁ Lưu tất cả vào OneDrive Output</button>` : `
-          <p class="small">Bấm nút dưới → chọn <b>OneDrive</b> trong bảng chia sẻ → mở thư mục <b>Apps Kiem Kho › Output</b> → <b>Tải lên</b>. Cả bộ file được lưu một lần.</p>
-          <button class="btn primary block" id="odall">☁ Lưu tất cả vào OneDrive</button>
-          <p class="muted small">Muốn app tự lưu thẳng vào Output không cần chọn thư mục: IT cấp Client ID Microsoft 365 rồi nhập ở ⚙ Cài đặt.</p>`}
-      </div>
+        <p class="small">Gửi cả bộ file thẳng vào thư mục <b>${E(Config.get().oneDrive.outputFolder)}</b> trên OneDrive.</p>
+        <button class="btn primary block" id="odall">☁ Lưu tất cả vào OneDrive Output</button>
+      </div>` : ''}
       ${Util.inAppBrowser ? '<div class="card warn-card small"><b>App đang mở trong Zalo/Facebook/Teams.</b> Các ứng dụng này chặn tải và chia sẻ file. Bấm ⋮ hoặc ⋯ → <b>Mở bằng trình duyệt</b> (Chrome/Safari), hoặc mở app từ biểu tượng trên màn hình chính.</div>' : ''}
       ${cloudStatusCard(s)}
       ${keys.map(k => [k, FILE_LABELS[k], files[k].name]).map(([k, t, fn]) => `
@@ -1306,25 +1303,12 @@
     $$('[data-ext]').forEach(b => b.onclick = () => act(() => Util.openExternal(files[b.dataset.ext].blob)));
     const all = keys.map(k => files[k]);
     if ($('#cloudNow')) $('#cloudNow').onclick = () => guard(async () => { Cloud.enqueue(s.id); const r = await flushCloud(); if (r.failed) toast('Chưa gửi được, kiểm tra mạng hoặc mã kết nối', 'err'); current = null; renderDone(id); }, 'Đang lưu lên dữ liệu chung...');
-    $('#odall').onclick = () => {
-      if (ms) {
-        guard(async () => {
-          for (const f of all) await DB.put('outbox', { id: Util.uid(), name: f.name, folder: Config.get().oneDrive.outputFolder, blob: f.blob, createdAt: Date.now() });
-          const r = await OneDrive.flushOutbox();
-          toast(r.pending ? `Đã gửi ${r.sent}, còn ${r.pending} file sẽ gửi khi có mạng` : `Đã lưu ${r.sent} file vào OneDrive Output`);
-          refreshNet();
-        }, 'Đang lưu lên OneDrive...');
-        return;
-      }
-      // Gọi chia sẻ ngay trong lần bấm (file đã tạo sẵn)
-      act(() => Util.shareMany(all).then(r => {
-        if (r === false) {
-          toast('Máy này không chia sẻ được nhiều file một lúc: dùng nút Chia sẻ ở từng file → OneDrive', 'err');
-        } else if (r === 'pdf-only') {
-          toast('Đã gửi 3 file PDF. File Excel đã tải về máy: mở app OneDrive → Tải lên vào Output.'); const x = files.excel; Util.download(x.blob, x.name);
-        }
-      }));
-    };
+    if ($('#odall')) $('#odall').onclick = () => guard(async () => {
+      for (const f of all) await DB.put('outbox', { id: Util.uid(), name: f.name, folder: Config.get().oneDrive.outputFolder, blob: f.blob, createdAt: Date.now() });
+      const r = await OneDrive.flushOutbox();
+      toast(r.pending ? `Đã gửi ${r.sent}, còn ${r.pending} file sẽ gửi khi có mạng` : `Đã lưu ${r.sent} file vào OneDrive Output`);
+      refreshNet();
+    }, 'Đang lưu lên OneDrive...');
     $$('[data-up]').forEach(b => b.onclick = () => guard(async () => {
       const f = files[b.dataset.up];
       const r = await OneDrive.queueUpload(f.name, f.blob);
@@ -1577,107 +1561,20 @@
       people: [...new Set(hs.map(h => h.user))] })).sort((a, b) => b.n - a.n);
     const facMax = Math.max(1, ...facRows.map(r => r.n));
     const admin = Auth.can.deleteHistory();
+    // Kế toán và quản trị được tải về / chia sẻ file biên bản; tài khoản chỉ xem chỉ được xem
+    const canFiles = Auth.can.count();
     const C = TYPE_COLORS;
     const short = k => ({ branch: 'Chi nhánh', meat: 'Meat', supplies: 'Spare part / Supplies', package: 'Package / Ingredient' })[k];
     const periodLabel = st.month ? `Tháng ${Number(st.month)}/${st.year}` : `Năm ${st.year}`;
+    const pctDone = list.length ? Math.round(done.length / list.length * 100) : 0;
+    const tab = st.tab = st.tab || 'overview';
 
-    // Lịch đi kiểm theo kế toán: hàng = kế toán, cột = ngày trong tháng (hoặc tháng trong năm)
-    const lanes = (st.user ? [st.user] : [...new Set(inYear.map(h => h.user))].sort());
-    let grid = '';
-    if (st.month) {
-      const days = new Date(Number(st.year), Number(st.month), 0).getDate();
-      const today = Util.today();
-      const head = Array.from({ length: days }, (_, i) => {
-        const d = new Date(Number(st.year), Number(st.month) - 1, i + 1);
-        return `<div class="gh ${d.getDay() === 0 ? 'sun' : ''}">${i + 1}<i>${DOW[d.getDay()]}</i></div>`;
-      }).join('');
-      grid = `<div class="lane-grid" style="--cols:${days}">
-        <div class="lane-name lane-head"></div><div class="lane-cells">${head}</div>
-        ${lanes.map(u => `<div class="lane-name"><span class="ava">${E(initials(u))}</span><span>${E(u)}</span></div><div class="lane-cells">${Array.from({ length: days }, (_, i) => {
-          const iso = `${st.year}-${st.month}-${String(i + 1).padStart(2, '0')}`;
-          const hs = list.filter(h => h.user === u && h.date === iso);
-          const dow = new Date(Number(st.year), Number(st.month) - 1, i + 1).getDay();
-          return `<div class="gc ${dow === 0 ? 'sun' : ''} ${iso === today ? 'today' : ''}" ${hs.length ? `data-day="${iso}" title="${E(hs.map(h => short(h.type) + ' · ' + h.factory).join('\n'))}"` : ''}>${hs.length ? `<span class="dot" style="background:${C[hs[0].type]}">${hs.length > 1 ? hs.length : ''}</span>` : ''}</div>`;
-        }).join('')}</div>`).join('') || '<p class="muted small">Chưa có lần kiểm nào.</p>'}
-      </div>`;
-    } else {
-      const maxCell = Math.max(1, ...lanes.map(u => Math.max(...byMonth.map(b => inYear.filter(h => h.user === u && h.date.slice(5, 7) === b.mm).length))));
-      grid = `<div class="lane-grid" style="--cols:12">
-        <div class="lane-name lane-head"></div><div class="lane-cells">${byMonth.map(b => `<div class="gh">T${Number(b.mm)}</div>`).join('')}</div>
-        ${lanes.map(u => `<div class="lane-name"><span class="ava">${E(initials(u))}</span><span>${E(u)}</span></div><div class="lane-cells">${byMonth.map(b => {
-          const n = inYear.filter(h => h.user === u && h.date.slice(5, 7) === b.mm).length;
-          return `<div class="gc heat" data-m="${b.mm}" style="--a:${n ? 0.18 + 0.82 * n / maxCell : 0}">${n || ''}</div>`;
-        }).join('')}</div>`).join('') || '<p class="muted small">Chưa có lần kiểm nào.</p>'}
-      </div>`;
-    }
-
-    // Dòng thời gian: nhóm theo ngày, mới nhất trước
-    const byDay = new Map();
-    list.forEach(h => { if (!byDay.has(h.date)) byDay.set(h.date, []); byDay.get(h.date).push(h); });
-    const feed = [...byDay].map(([d, hs]) => {
-      const dt = new Date(d + 'T00:00:00');
-      return `<div class="day-head"><b>${DOW[dt.getDay()]}, ${Util.vnDate(d)}</b><span>${hs.length} lần kiểm</span></div>
-        ${hs.map(h => {
-          const s = h.stats || {};
-          const res = h.type === 'branch'
-            ? `<span class="pill ${s.fail ? 'bad' : 'good'}">${s.pass || 0} đạt · ${s.fail || 0} không đạt</span>`
-            : `<span class="pill ${s.diff ? 'bad' : s.counted ? 'good' : ''}">${s.counted || 0}/${s.lines || 0} dòng · ${s.diff ? s.diff + ' lệch' : s.counted ? 'khớp sổ' : 'chưa đếm'}</span>`;
-          const files = (h.files || []).filter(f => /\.pdf$/i.test(f.name));
-          return `<div class="ev" style="--c:${C[h.type]}">
-            <div class="ev-time"><b>${hm(h.start)}</b><span>${hm(h.end)}</span></div>
-            <div class="ev-body">
-              <div class="ev-top"><span class="tchip" style="--c:${C[h.type]}">${TYPES[h.type].icon} ${short(h.type)}</span><span class="pill ${h.status === 'done' ? 'done' : 'run'}">${h.status === 'done' ? 'Hoàn tất' : 'Đang kiểm'}</span></div>
-              <div class="ev-title">${E(h.factory)}</div>
-              <div class="ev-meta"><span class="ava sm">${E(initials(h.user))}</span>${E(h.user)}${dur(h.start, h.end) ? ` · ⏱ ${dur(h.start, h.end)}` : ''}${h.docNo ? ` · ${E(h.docNo)}` : ''}</div>
-              <div class="ev-meta">${res}${h.cloud ? ' <span class="pill cloud">☁</span>' : h.local === false ? ' <span class="pill">nhập từ máy khác</span>' : ''}</div>
-              <div class="ev-act">
-                ${h.local ? `<button class="btn small-btn" data-open="${h.id}" data-st="${h.status}">${h.status === 'done' ? 'Mở kết quả' : 'Tiếp tục'}</button>` : ''}
-                ${!h.local ? files.map(f => `<button class="btn small-btn" data-cf="${E(f.path)}" data-cn="${E(f.name)}">📄 ${E(FILE_LABELS[f.key] || f.name)}</button>`).join('') : ''}
-                ${admin && (h.cloud || h.local) ? `<button class="btn small-btn danger" data-del="${h.id}">🗑 Xóa</button>` : ''}
-              </div>
-            </div>
-          </div>`;
-        }).join('')}`;
-    }).join('');
-
-    view().innerHTML = `
-      <div class="dash-hero">
-        <div class="row between">
-          <div><div class="hero-sub">Tình trạng kiểm kho</div><div class="hero-title">${periodLabel}</div></div>
-          <select id="dy" class="hero-sel">${years.map(y => `<option ${y === st.year ? 'selected' : ''}>${y}</option>`).join('')}</select>
-        </div>
-        <div class="kpis">
-          <div><b>${list.length}</b><span>lần kiểm</span></div>
-          <div><b>${done.length}</b><span>hoàn tất</span></div>
-          <div><b>${new Set(list.map(h => h.factoryCode)).size}</b><span>nhà máy</span></div>
-          <div><b>${people.length}</b><span>kế toán</span></div>
-          <div class="${issues ? 'warn' : ''}"><b>${issues}</b><span>lệch / KĐ</span></div>
-        </div>
-        <div class="sync-line">${cloudState === 'off' ? '📱 Chỉ dữ liệu trên máy này' : cloudState === 'loading' ? '☁ Đang tải lịch sử chung...' : cloudState === 'live' ? '☁ Lịch sử chung của mọi kế toán · vừa cập nhật' : `☁ Đang offline · bản lưu lúc ${cloudAt ? Util.vnDateTime(cloudAt) : '—'}`}</div>
-      </div>
-
-      <div class="chips">
-        <button class="chip ${!st.type ? 'on' : ''}" data-t="">Tất cả loại kiểm</button>
-        ${Object.keys(TYPES).map(k => `<button class="chip ${st.type === k ? 'on' : ''}" data-t="${k}"><i style="background:${C[k]}"></i>${short(k)}</button>`).join('')}
-      </div>
+    // ----- Tổng quan: theo tháng, theo loại kiểm, theo chi nhánh -----
+    const typeRows = Object.keys(TYPES).map(k => ({ k, n: list.filter(h => h.type === k).length }));
+    const typeMax = Math.max(1, ...typeRows.map(r => r.n));
+    const overview = `
       <div class="card">
-        <div class="filters">
-          <label>Tháng<select id="dm"><option value="">Cả năm ${E(st.year)}</option>${byMonth.map(b => `<option value="${b.mm}" ${b.mm === st.month ? 'selected' : ''}>Tháng ${Number(b.mm)}${b.n ? ` (${b.n})` : ''}</option>`).join('')}</select></label>
-          <label>Trạng thái<select id="dst"><option value="">Tất cả</option><option value="done" ${st.status === 'done' ? 'selected' : ''}>Hoàn tất</option><option value="counting" ${st.status === 'counting' ? 'selected' : ''}>Đang kiểm</option></select></label>
-          <label>Chi nhánh<select id="dfac"><option value="">Tất cả chi nhánh</option>${[...facNames].sort((a, b) => a[1].localeCompare(b[1], 'vi')).map(([k, n]) => `<option value="${E(k)}" ${k === st.factory ? 'selected' : ''}>${E(n)}</option>`).join('')}</select></label>
-          <label>Người kiểm<select id="du"><option value="">Tất cả kế toán</option>${users.map(u => `<option ${u === st.user ? 'selected' : ''}>${E(u)}</option>`).join('')}</select></label>
-        </div>
-        ${(st.month || st.status || st.factory || st.user || st.type) ? `<div class="filter-tags">
-          ${st.type ? `<button class="ftag" data-clr="type">${short(st.type)} ✕</button>` : ''}
-          ${st.month ? `<button class="ftag" data-clr="month">Tháng ${Number(st.month)} ✕</button>` : ''}
-          ${st.status ? `<button class="ftag" data-clr="status">${st.status === 'done' ? 'Hoàn tất' : 'Đang kiểm'} ✕</button>` : ''}
-          ${st.factory ? `<button class="ftag" data-clr="factory">${E(facNames.get(st.factory) || st.factory)} ✕</button>` : ''}
-          ${st.user ? `<button class="ftag" data-clr="user">${E(st.user)} ✕</button>` : ''}
-          <button class="ftag clear" data-clr="all">Bỏ tất cả bộ lọc</button></div>` : ''}
-      </div>
-
-      <div class="card">
-        <div class="row between"><h3>Số lần kiểm theo tháng</h3>${st.month ? '<button class="btn small-btn" id="allyear">Xem cả năm</button>' : ''}</div>
+        <h3>Số lần kiểm theo tháng · ${E(st.year)}</h3>
         <div class="mchart">${byMonth.map(b => `
           <div class="mcol ${b.mm === st.month ? 'sel' : ''}" data-m="${b.mm}" title="Tháng ${Number(b.mm)}: ${b.n} lần">
             <div class="mval">${b.n || ''}</div>
@@ -1685,60 +1582,163 @@
             <div class="mlab">T${Number(b.mm)}</div>
           </div>`).join('')}
         </div>
-        <p class="muted small">Bấm vào cột để xem chi tiết tháng.</p>
+        <p class="muted small">Bấm vào cột để xem tháng đó.</p>
       </div>
-
       <div class="card">
-        <h3>Lịch đi kiểm theo kế toán · ${periodLabel}</h3>
-        <div class="lane-wrap">${grid}</div>
-        <div class="legend small">${Object.keys(TYPES).map(k => `<span><i style="background:${C[k]}"></i>${short(k)}</span>`).join('')}</div>
+        <h3>Theo loại kiểm</h3>
+        ${typeRows.map(r => `<div class="hbar click ${st.type === r.k ? 'on' : ''}" data-ty="${r.k}">
+          <span class="hb-l"><i style="background:${C[r.k]}"></i>${short(r.k)}</span>
+          <span class="hb-t"><i style="width:${r.n / typeMax * 100}%;background:${C[r.k]}"></i></span><b>${r.n}</b></div>`).join('')}
       </div>
-
       <div class="card">
-        <h3>Theo chi nhánh · ${periodLabel}</h3>
-        ${facRows.length ? `<table class="fac-tbl"><thead><tr><th>Chi nhánh</th><th class="num">Lần</th><th>Gần nhất</th><th>Người kiểm</th></tr></thead><tbody>
-          ${facRows.map(r => `<tr class="click" data-fac="${E(r.code)}">
-            <td><b>${E(r.name)}</b><div class="muted small">${E(r.code)} · ${r.done}/${r.n} hoàn tất${r.issues ? ` · <span class="short">${r.issues} lệch/KĐ</span>` : ''}</div><div class="mini-bar"><i style="width:${r.n / facMax * 100}%"></i></div></td>
-            <td class="num">${r.n}</td>
-            <td class="small">${Util.vnDate(r.last.date)}<div class="muted">${E(r.last.user)}</div></td>
-            <td><div class="ava-stack">${r.people.map(u => `<span class="ava sm" title="${E(u)}">${E(initials(u))}</span>`).join('')}</div></td>
-          </tr>`).join('')}</tbody></table><p class="muted small">Bấm vào chi nhánh để lọc.</p>` : '<p class="muted small">Không có lần kiểm nào.</p>'}
-      </div>
-
-      <h3 class="section">Dòng thời gian · ${periodLabel}</h3>
-      <div class="feed">${feed || '<div class="card muted">Không có lần kiểm nào trong khoảng này.</div>'}</div>
-
-      <div class="card">
-        <h3>Xuất dữ liệu</h3>
-        <div class="row gap">
-          <button class="btn small-btn" id="hxl">⬇ Excel lịch sử ${E(periodLabel.toLowerCase())}</button>
-          ${Cloud.enabled() ? '' : `<button class="btn small-btn" id="hx">⬇ Xuất lịch sử (.json)</button>
-          <label class="btn small-btn">⬆ Nhập lịch sử<input type="file" id="hi" accept=".json,application/json" hidden multiple></label>`}
-        </div>
-        ${Cloud.enabled() ? '' : '<p class="muted small">Chưa bật dữ liệu chung: mỗi máy lưu lịch sử riêng. Quản trị viên bật trong ⚙ Cài đặt để mọi kế toán dùng chung.</p>'}
+        <h3>Theo chi nhánh</h3>
+        ${facRows.length ? facRows.map(r => `<div class="frow click ${st.factory === r.code ? 'on' : ''}" data-fac="${E(r.code)}">
+          <div class="frow-main"><b>${E(r.name)}</b>
+            <span class="muted small">Gần nhất ${Util.vnDate(r.last.date)} · ${E(r.last.user)}</span>
+            <div class="mini-bar"><i style="width:${r.n / facMax * 100}%"></i></div></div>
+          <div class="frow-num"><b>${r.n}</b><span>${r.done}/${r.n} xong${r.issues ? ` · <em>${r.issues} lệch</em>` : ''}</span></div>
+        </div>`).join('') + '<p class="muted small">Bấm vào chi nhánh để lọc.</p>' : '<p class="muted small">Chưa có lần kiểm nào.</p>'}
       </div>`;
 
-    // Lịch theo ngày: cuộn tới hôm nay (hoặc ngày kiểm gần nhất)
-    const focus = $('.gc.today') || $$('.gc[data-day]').pop();
-    if (focus) $('.lane-wrap').scrollLeft = Math.max(0, focus.offsetLeft - 200);
-    const upd = (k, v) => { st[k] = v; if (k === 'year') { st.month = ''; return renderDashboard(); } drawDashboard(own, cloudList, cloudState, cloudAt); };
+    // ----- Lịch kiểm: mỗi kế toán một thẻ, tên hiện đầy đủ; tháng = lịch tuần, năm = 12 ô tháng -----
+    const lanes = st.user ? [st.user] : [...new Set(inYear.map(h => h.user))].sort((a, b) => a.localeCompare(b, 'vi'));
+    const today = Util.today();
+    const who = (u, sub) => `<div class="cal-who"><span class="ava">${E(initials(u))}</span><div><b>${E(u)}</b><span class="muted small">${sub}</span></div></div>`;
+    let cal;
+    if (st.month) {
+      const y = Number(st.year), m = Number(st.month);
+      const days = new Date(y, m, 0).getDate();
+      const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7; // tuần bắt đầu từ thứ 2
+      const head = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(d => `<span class="cal-h">${d}</span>`).join('');
+      cal = lanes.map(u => {
+        const mine = list.filter(h => h.user === u);
+        const cells = '<span></span>'.repeat(lead) + Array.from({ length: days }, (_, i) => {
+          const iso = `${st.year}-${st.month}-${String(i + 1).padStart(2, '0')}`;
+          const hs = mine.filter(h => h.date === iso);
+          const dow = new Date(y, m - 1, i + 1).getDay();
+          return `<span class="cal-d ${hs.length ? 'has' : ''} ${dow === 0 ? 'sun' : ''} ${iso === today ? 'today' : ''}" ${hs.length ? `data-day="${iso}" style="--c:${C[hs[0].type]}" title="${E(hs.map(h => short(h.type) + ' · ' + h.factory).join('\n'))}"` : ''}>${i + 1}${hs.length > 1 ? `<sup>${hs.length}</sup>` : ''}</span>`;
+        }).join('');
+        return `<div class="cal-card">${who(u, `${mine.length} lần kiểm · ${new Set(mine.map(h => h.factoryCode)).size} chi nhánh`)}<div class="cal-grid">${head}${cells}</div></div>`;
+      }).join('');
+    } else {
+      cal = lanes.map(u => {
+        const mine = inYear.filter(h => h.user === u);
+        const per = byMonth.map(b => mine.filter(h => h.date.slice(5, 7) === b.mm).length);
+        const top = Math.max(1, ...per);
+        return `<div class="cal-card">${who(u, `${mine.length} lần kiểm trong năm`)}<div class="cal-year">${byMonth.map((b, i) =>
+          `<span class="cal-m ${per[i] ? 'has' : ''}" data-m="${b.mm}" style="--a:${per[i] ? 0.25 + 0.75 * per[i] / top : 0}"><i>T${Number(b.mm)}</i><b>${per[i] || ''}</b></span>`).join('')}</div></div>`;
+      }).join('');
+    }
+    const calendar = `<div class="cal-list">${cal || '<div class="card muted">Chưa có lần kiểm nào.</div>'}</div>
+      <div class="legend small">${Object.keys(TYPES).map(k => `<span><i style="background:${C[k]}"></i>${short(k)}</span>`).join('')}</div>
+      <p class="muted small">${st.month ? 'Bấm vào ngày có màu để xem lần kiểm đó.' : 'Bấm vào tháng để xem lịch chi tiết.'}</p>`;
+
+    // ----- Dòng thời gian: nhóm theo ngày, mới nhất trước -----
+    const byDay = new Map();
+    list.forEach(h => { if (!byDay.has(h.date)) byDay.set(h.date, []); byDay.get(h.date).push(h); });
+    const feed = [...byDay].map(([d, hs]) => {
+      const dt = new Date(d + 'T00:00:00');
+      return `<div class="day-head" data-d="${d}"><b>${DOW[dt.getDay()]}, ${Util.vnDate(d)}</b><span>${hs.length} lần kiểm</span></div>
+        ${hs.map(h => {
+          const s = h.stats || {};
+          const res = h.type === 'branch'
+            ? `<span class="pill ${s.fail ? 'bad' : 'good'}">${s.pass || 0} đạt · ${s.fail || 0} không đạt</span>`
+            : `<span class="pill ${s.diff ? 'bad' : s.counted ? 'good' : ''}">${s.counted || 0}/${s.lines || 0} dòng · ${s.diff ? s.diff + ' lệch' : s.counted ? 'khớp sổ' : 'chưa đếm'}</span>`;
+          const pdfs = (h.files || []).filter(f => /\.pdf$/i.test(f.name));
+          const xls = canFiles ? (h.files || []).filter(f => /\.xlsx?$/i.test(f.name)) : [];
+          return `<div class="ev" style="--c:${C[h.type]}">
+            <div class="ev-time"><b>${hm(h.start)}</b><span>${hm(h.end)}</span></div>
+            <div class="ev-body">
+              <div class="ev-top"><span class="tchip" style="--c:${C[h.type]}">${TYPES[h.type].icon} ${short(h.type)}</span><span class="pill ${h.status === 'done' ? 'done' : 'run'}">${h.status === 'done' ? 'Hoàn tất' : 'Đang kiểm'}</span></div>
+              <div class="ev-title">${E(h.factory)}</div>
+              <div class="ev-meta"><span class="ava sm">${E(initials(h.user))}</span>${E(h.user)}${dur(h.start, h.end) ? ` · ⏱ ${dur(h.start, h.end)}` : ''}${h.docNo ? ` · ${E(h.docNo)}` : ''}</div>
+              <div class="ev-meta">${res}</div>
+              <div class="ev-act">
+                ${h.local ? `<button class="btn small-btn" data-open="${h.id}" data-st="${h.status}">${h.status === 'done' ? 'Mở kết quả' : 'Tiếp tục'}</button>` : ''}
+                ${!h.local ? pdfs.map(f => `<button class="btn small-btn" data-cf="${E(f.path)}" data-cn="${E(f.name)}">📄 ${E(FILE_LABELS[f.key] || f.name)}</button>`).join('')
+                  + xls.map(f => `<button class="btn small-btn" data-cx="${E(f.path)}" data-cn="${E(f.name)}">⬇ ${E(FILE_LABELS[f.key] || f.name)}</button>`).join('') : ''}
+                ${admin && (h.cloud || h.local) ? `<button class="btn small-btn danger" data-del="${h.id}">🗑 Xóa</button>` : ''}
+              </div>
+            </div>
+          </div>`;
+        }).join('')}`;
+    }).join('');
+    const feedHtml = `<div class="feed">${feed || '<div class="card muted">Không có lần kiểm nào trong khoảng này.</div>'}</div>
+      ${canFiles ? '' : '<p class="muted small">Tài khoản chỉ xem: xem được file biên bản, không tải về hay chia sẻ.</p>'}`;
+
+    const sel = (id, all, opts) => `<select id="${id}"><option value="">${all}</option>${opts}</select>`;
+    view().innerHTML = `
+      <div class="dash-hero">
+        <div class="hero-top">
+          <div><div class="hero-sub">Tình hình kiểm kho</div><div class="hero-title">${periodLabel}</div></div>
+          <div class="hero-ctl">
+            ${st.month ? '<button class="hero-nav" data-mv="-1" aria-label="Tháng trước">‹</button>' : ''}
+            <select id="dm" class="hero-sel"><option value="">Cả năm</option>${byMonth.map(b => `<option value="${b.mm}" ${b.mm === st.month ? 'selected' : ''}>Tháng ${Number(b.mm)}</option>`).join('')}</select>
+            <select id="dy" class="hero-sel">${years.map(y => `<option ${y === st.year ? 'selected' : ''}>${y}</option>`).join('')}</select>
+            ${st.month ? '<button class="hero-nav" data-mv="1" aria-label="Tháng sau">›</button>' : ''}
+          </div>
+        </div>
+        <div class="kpis">
+          <div><b>${list.length}</b><span>lần kiểm</span></div>
+          <div><b>${new Set(list.map(h => h.factoryCode)).size}</b><span>chi nhánh</span></div>
+          <div><b>${people.length}</b><span>kế toán</span></div>
+          <div class="${issues ? 'warn' : ''}"><b>${issues}</b><span>lệch / không đạt</span></div>
+        </div>
+        <div class="hero-prog"><div class="row between"><span>Hoàn tất ${done.length}/${list.length}</span><b>${pctDone}%</b></div><div class="hp-bar"><i style="width:${pctDone}%"></i></div></div>
+        <div class="sync-line">${cloudState === 'loading' ? '☁ Đang tải lịch sử chung...' : cloudState === 'live' ? '☁ Dữ liệu chung của mọi kế toán, vừa cập nhật' : cloudState === 'off' ? '📱 Chỉ dữ liệu trên máy này' : `☁ Đang offline, bản lưu lúc ${cloudAt ? Util.vnDateTime(cloudAt) : '—'}`}</div>
+      </div>
+
+      <div class="chips">
+        <button class="chip ${!st.type ? 'on' : ''}" data-t="">Tất cả</button>
+        ${Object.keys(TYPES).map(k => `<button class="chip ${st.type === k ? 'on' : ''}" data-t="${k}"><i style="background:${C[k]}"></i>${short(k)}</button>`).join('')}
+      </div>
+      <div class="dfilters">
+        ${sel('dfac', 'Mọi chi nhánh', [...facNames].sort((a, b) => a[1].localeCompare(b[1], 'vi')).map(([k, n]) => `<option value="${E(k)}" ${k === st.factory ? 'selected' : ''}>${E(n)}</option>`).join(''))}
+        ${sel('du', 'Mọi kế toán', users.map(u => `<option ${u === st.user ? 'selected' : ''}>${E(u)}</option>`).join(''))}
+        ${sel('dst', 'Mọi trạng thái', `<option value="done" ${st.status === 'done' ? 'selected' : ''}>Hoàn tất</option><option value="counting" ${st.status === 'counting' ? 'selected' : ''}>Đang kiểm</option>`)}
+      </div>
+      ${(st.status || st.factory || st.user || st.type) ? '<button class="ftag clear" data-clr="all">✕ Bỏ bộ lọc</button>' : ''}
+
+      <div class="seg">${[['overview', 'Tổng quan'], ['calendar', 'Lịch kiểm'], ['feed', 'Dòng thời gian']].map(([k, t]) =>
+        `<button class="${tab === k ? 'on' : ''}" data-tab="${k}">${t}</button>`).join('')}</div>
+      ${tab === 'calendar' ? calendar : tab === 'feed' ? feedHtml : overview}
+
+      <button class="btn small-btn" id="hxl">⬇ Xuất Excel lịch sử ${E(periodLabel.toLowerCase())}</button>`;
+
+    const redraw = () => drawDashboard(own, cloudList, cloudState, cloudAt);
+    const upd = (k, v) => { st[k] = v; if (k === 'year') { st.month = ''; return renderDashboard(); } redraw(); };
     $('#dy').onchange = e => upd('year', e.target.value);
     $('#du').onchange = e => upd('user', e.target.value);
     $('#dm').onchange = e => upd('month', e.target.value);
     $('#dst').onchange = e => upd('status', e.target.value);
     $('#dfac').onchange = e => upd('factory', e.target.value);
+    $$('[data-mv]').forEach(b => b.onclick = () => {
+      const d = new Date(Number(st.year), Number(st.month) - 1 + Number(b.dataset.mv), 1);
+      const y = String(d.getFullYear()), m = String(d.getMonth() + 1).padStart(2, '0');
+      if (y !== st.year) { st.year = y; st.month = m; return renderDashboard(); }
+      upd('month', m);
+    });
+    $$('[data-tab]').forEach(b => b.onclick = () => upd('tab', b.dataset.tab));
     $$('[data-fac]').forEach(r => r.onclick = () => upd('factory', st.factory === r.dataset.fac ? '' : r.dataset.fac));
-    $$('[data-clr]').forEach(b => b.onclick = () => { if (b.dataset.clr === 'all') { st.type = st.month = st.status = st.factory = st.user = ''; drawDashboard(own, cloudList, cloudState, cloudAt); } else upd(b.dataset.clr, ''); });
+    $$('[data-ty]').forEach(r => r.onclick = () => upd('type', st.type === r.dataset.ty ? '' : r.dataset.ty));
+    $$('[data-clr]').forEach(b => b.onclick = () => { st.type = st.status = st.factory = st.user = ''; redraw(); });
     $$('.chip').forEach(c => c.onclick = () => upd('type', c.dataset.t));
     $$('.mcol').forEach(c => c.onclick = () => upd('month', st.month === c.dataset.m ? '' : c.dataset.m));
-    $$('.gc.heat[data-m]').forEach(c => c.onclick = () => upd('month', c.dataset.m));
-    if ($('#allyear')) $('#allyear').onclick = () => upd('month', '');
-    $$('.gc[data-day]').forEach(c => c.onclick = () => {
-      const el = $$('.day-head').find(x => x.textContent.includes(Util.vnDate(c.dataset.day)));
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    $$('.cal-m[data-m]').forEach(c => c.onclick = () => upd('month', c.dataset.m));
+    // Bấm ngày trên lịch: sang Dòng thời gian, cuộn tới ngày đó
+    $$('.cal-d[data-day]').forEach(c => c.onclick = () => { st.focusDay = c.dataset.day; upd('tab', 'feed'); });
+    if (tab === 'feed' && st.focusDay) {
+      const el = $(`.day-head[data-d="${st.focusDay}"]`);
+      st.focusDay = '';
+      if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    }
     $$('[data-open]').forEach(b => b.onclick = () => go((b.dataset.st === 'done' ? '#done/' : '#count/') + b.dataset.open));
-    $$('[data-cf]').forEach(b => b.onclick = () => guard(async () => Viewer.open(await Cloud.getBlob(b.dataset.cf), b.dataset.cn), 'Đang tải file...'));
+    const act = p => Promise.resolve(p).catch(e => toast(e.message, 'err'));
+    $$('[data-cf]').forEach(b => b.onclick = () => guard(async () => {
+      const blob = await Cloud.getBlob(b.dataset.cf), name = b.dataset.cn;
+      Viewer.open(blob, name, canFiles ? [{ label: 'Tải về', run: () => act(Util.download(blob, name)) }, { label: 'Chia sẻ', run: () => act(Util.share(blob, name)) }] : []);
+    }, 'Đang tải file...'));
+    $$('[data-cx]').forEach(b => b.onclick = () => guard(async () => act(Util.download(await Cloud.getBlob(b.dataset.cx), b.dataset.cn)), 'Đang tải file...'));
     $$('[data-del]').forEach(b => b.onclick = () => {
       const h = all.find(x => x.id === b.dataset.del);
       if (!h || !confirm(`Xóa lần kiểm ${h.docNo || ''} · ${h.factory} · ${Util.vnDate(h.date)} của ${h.user}?\nLịch sử và các file biên bản của lần này sẽ bị xóa khỏi dữ liệu chung${h.local ? ' và khỏi máy này' : ''}. Không khôi phục được.`)) return;
@@ -1748,23 +1748,6 @@
         toast('Đã xóa lần kiểm'); renderDashboard();
       }, 'Đang xóa...');
     });
-    const user = Auth.currentUser();
-    if ($('#hx')) $('#hx').onclick = () => {
-      const blob = new Blob([JSON.stringify({ app: 'CPV SLH Kiem Kho', exportedBy: user.name, at: new Date().toISOString(), history: own.map(h => Object.assign({}, h, { local: false })) }, null, 1)], { type: 'application/json' });
-      Util.download(blob, `LichSuKiemKho_${Util.safeName(user.name)}_${Util.today()}.json`);
-    };
-    if ($('#hi')) $('#hi').onchange = async e => {
-      let n = 0;
-      const ext = externalHistory();
-      for (const f of e.target.files) {
-        try {
-          const d = JSON.parse(await f.text());
-          (d.history || []).forEach(h => { if (h.id && !ext.some(x => x.id === h.id)) { ext.push(Object.assign(h, { local: false })); n++; } });
-        } catch (err) { toast('File không đúng định dạng: ' + f.name, 'err'); }
-      }
-      localStorage.setItem(HIST_KEY, JSON.stringify(ext));
-      toast(`Đã nhập ${n} lần kiểm`); renderDashboard();
-    };
     $('#hxl').onclick = () => {
       const rows = list.map(h => ({ 'Ngày': Util.vnDate(h.date), 'Loại kiểm': TYPES[h.type].name, 'Nhà máy': h.factory, 'Mã NM': h.factoryCode, 'Số biên bản': h.docNo || '', 'Kế toán': h.user,
         'Bắt đầu': h.start ? Util.vnDateTime(h.start) : '', 'Kết thúc': h.end ? Util.vnDateTime(h.end) : '', 'Thời gian': dur(h.start, h.end), 'Trạng thái': h.status === 'done' ? 'Hoàn tất' : 'Đang kiểm',
@@ -1827,14 +1810,14 @@
           ${localStorage.getItem('kk_checklist') ? '<button class="btn small-btn" id="cDef">Dùng mẫu mặc định</button>' : ''}
         </div>
       </div>
-      <div class="card">
-        <h3>Microsoft 365 / OneDrive</h3>
+      <details class="card" ${c.msal.clientId ? 'open' : ''}>
+        <summary><b>Nâng cao: đăng nhập Microsoft 365</b> <span class="muted small">(chỉ cần khi IT cấp Client ID)</span></summary>
         <label>Client ID (Azure AD app)<input id="cid" value="${E(c.msal.clientId)}" placeholder="xxxxxxxx-xxxx-..."></label>
         <label>Tenant ID<input id="tid" value="${E(c.msal.tenantId)}"></label>
         <label>Thư mục Input<input id="inf" value="${E(c.oneDrive.inputFolder)}"></label>
         <label>Thư mục Output<input id="outf" value="${E(c.oneDrive.outputFolder)}"></label>
         <p class="muted small">Redirect URI cần đăng ký trong Azure: ${E(location.origin + location.pathname)}</p>
-      </div>
+      </details>
       <div class="card">
         <h3>Nhà máy</h3>
         <div id="facs">${c.factories.map(f => facRow(f)).join('')}</div>
@@ -1861,10 +1844,18 @@
       <div class="card">
         <h3>Tài khoản & phân quyền</h3>
         <p class="muted small"><b>Quản trị</b>: sửa cài đặt, nhà máy, tài khoản, xóa lịch sử kiểm thừa · <b>Kế toán</b>: đi kiểm, xem dashboard · <b>Chỉ xem</b>: xem dashboard và file biên bản.${Cloud.enabled() ? ' Tài khoản dùng chung cho mọi máy đã kết nối.' : ''}</p>
-        ${c.localUsers.map(u => `<div class="urow">
-          <div><b>${E(u.name)}</b><div class="muted small">${E(u.email)}</div></div>
-          <select data-role="${E(u.email)}">${Object.entries(Auth.ROLES).map(([k, t]) => `<option value="${k}" ${Auth.roleOf(u) === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
-          <button class="btn small-btn" data-rmu="${E(u.email)}" ${user && user.email === u.email ? 'disabled title="Không tự xóa tài khoản đang dùng"' : ''}>Xóa</button>
+        ${c.localUsers.map(u => `<div class="urow-wrap">
+          <div class="urow">
+            <div><b>${E(u.name)}</b><div class="muted small">${E(u.email)}</div></div>
+            <select data-role="${E(u.email)}">${Object.entries(Auth.ROLES).map(([k, t]) => `<option value="${k}" ${Auth.roleOf(u) === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+            <button class="btn small-btn" data-edu="${E(u.email)}">Sửa</button>
+            <button class="btn small-btn" data-rmu="${E(u.email)}" ${user && user.email === u.email ? 'disabled title="Không tự xóa tài khoản đang dùng"' : ''}>Xóa</button>
+          </div>
+          <div class="uedit" data-uedit="${E(u.email)}" hidden>
+            <label class="small">Tên hiển thị<input class="uen" value="${E(u.name)}"></label>
+            <label class="small">Mật khẩu mới (để trống nếu giữ nguyên)<input class="uep" type="password" autocomplete="new-password"></label>
+            <div class="row gap"><button class="btn small-btn primary" data-usv="${E(u.email)}">Lưu</button><button class="btn small-btn" data-edu="${E(u.email)}">Hủy</button></div>
+          </div>
         </div>`).join('') || '<p class="muted small">Chưa có</p>'}
         <h4>Thêm tài khoản</h4>
         <input id="ue" type="email" placeholder="Email"><input id="un" placeholder="Họ tên"><input id="up" type="password" placeholder="Mật khẩu">
@@ -1981,6 +1972,13 @@
       try { Auth.setRole(s.dataset.role, s.value); toast('Đã đổi quyền ' + s.dataset.role); } catch (e) { toast(e.message, 'err'); }
       Auth.refreshUser(); renderSettings();
     });
+    $$('[data-edu]').forEach(b => b.onclick = () => { const box = $(`[data-uedit="${CSS.escape(b.dataset.edu)}"]`); box.hidden = !box.hidden; });
+    $$('[data-usv]').forEach(b => b.onclick = () => guard(async () => {
+      const box = b.closest('.uedit');
+      await Auth.updateLocalUser(b.dataset.usv, $('.uen', box).value, $('.uep', box).value);
+      Auth.refreshUser();
+      toast('Đã cập nhật tài khoản ' + b.dataset.usv); renderSettings();
+    }));
     $$('[data-rmu]').forEach(b => b.onclick = () => { if (confirm('Xóa tài khoản ' + b.dataset.rmu + '?')) { Auth.removeLocalUser(b.dataset.rmu); renderSettings(); } });
     if ($('#logout')) $('#logout').onclick = () => { Auth.logout(); current = null; go('#login'); };
     bindCloudCard(true);

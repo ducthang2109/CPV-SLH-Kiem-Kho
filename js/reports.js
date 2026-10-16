@@ -160,7 +160,7 @@ const Reports = (function () {
       },
       (s.opinion || s.generalNote) ? {
         margin: [0, 6, 0, 0], fontSize: 8, stack: [
-          s.opinion ? { text: [{ text: 'Ý kiến giải quyết chênh lệch: ', bold: true }, s.opinion] } : '',
+          s.opinion ? { text: [{ text: 'Ý kiến xử lý chênh lệch: ', bold: true }, s.opinion] } : '',
           s.generalNote ? { text: [{ text: 'Ghi chú: ', bold: true }, s.generalNote] } : ''
         ]
       } : '',
@@ -208,7 +208,7 @@ const Reports = (function () {
     const f = s.factory;
     if (!p || !p.geo || p.geo.error || f.lat == null || f.lat === '' || f.lng == null) return '';
     const d = Geo.distance(p.geo, { lat: Number(f.lat), lng: Number(f.lng) });
-    return `Cách toạ độ nhà máy ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'}`;
+    return `Cách nhà máy ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'}`;
   }
 
   function photoAppendix(items) {
@@ -354,29 +354,29 @@ const Reports = (function () {
     // ===== 2. Tóm tắt điều hành =====
     const findings = [];
     findings.push(`Đã kiểm ${counted.length}/${items.length} dòng hàng (${F(coverage)}%) tại ${byWarehouse(items).size} kho.`);
-    findings.push(diff.length ? `${diff.length} dòng chênh lệch: thừa/thiếu ${signed(Util.round(varQ))} ĐV, ${signed(Util.round(varW))} kg (${signed(pct(varW, sysW))}% trọng lượng sổ sách).` : 'Số lượng và trọng lượng thực tế khớp sổ sách.');
-    if (diff.length) findings.push(`Chênh lệch lớn nhất: ${diff[0].code} – ${diff[0].name}, lô ${diff[0].lot}: ${signed(diff[0].var.wgh)} kg.`);
-    if (expired.length || near.length) findings.push(`${expired.length} dòng đã hết hạn, ${near.length} dòng sắp hết hạn cần xử lý ưu tiên.`);
-    if (uncounted.length) findings.push(`${uncounted.length} dòng chưa kiểm được.`);
-    if (scans) findings.push(`Quét ${scans} tem${unknown ? `, trong đó ${unknown} tem không có trong tồn sổ sách` : ''}.`);
+    findings.push(diff.length ? `${diff.length} dòng lệch sổ: số lượng ${signed(Util.round(varQ))}, trọng lượng ${signed(Util.round(varW))} kg (${signed(pct(varW, sysW))}% so với sổ).` : 'Số lượng và trọng lượng thực tế khớp sổ.');
+    if (diff.length) findings.push(`Lệch nhiều nhất: ${diff[0].code} – ${diff[0].name}, lô ${diff[0].lot}: ${signed(diff[0].var.wgh)} kg.`);
+    if (expired.length || near.length) findings.push(`${expired.length} dòng hết hạn, ${near.length} dòng sắp hết hạn, cần xử lý trước.`);
+    if (uncounted.length) findings.push(`${uncounted.length} dòng chưa kiểm.`);
+    if (scans) findings.push(`Đã quét ${scans} tem${unknown ? `, ${unknown} tem không có trong sổ` : ''}.`);
     const actions = actionPlan();
-    content.push(slide('01', 'Tóm tắt kết quả kiểm kê', diff.length || expired.length ? 'Kho cơ bản khớp sổ sách, còn một số chênh lệch và hàng cận hạn cần xử lý.' : 'Tồn kho thực tế khớp sổ sách, không có hàng hết hạn.'));
+    content.push(slide('01', 'Tóm tắt kết quả kiểm kê', diff.length || expired.length ? 'Có hàng lệch sổ hoặc sắp hết hạn cần xử lý.' : 'Hàng thực tế khớp sổ, không có hàng hết hạn.'));
     content.push({
       columns: [
-        card('Độ chính xác (dòng khớp)', F(accuracy) + '%', `${matchLines}/${counted.length} dòng khớp sổ sách`, accuracy >= 98 ? GREEN : accuracy >= 95 ? ORANGE : RED),
-        card('Tiến độ kiểm', F(coverage) + '%', `${counted.length}/${items.length} dòng đã kiểm`, coverage === 100 ? GREEN : ORANGE),
-        card('Chênh lệch trọng lượng', signed(Util.round(varW, 1)) + ' kg', `${signed(pct(varW, sysW))}% so với ${kg(sysW)} sổ sách`, Math.abs(varW) < 0.005 ? GREEN : RED),
-        card('Cảnh báo hạn dùng', String(expired.length + near.length), `${expired.length} hết hạn · ${near.length} sắp hết hạn`, expired.length ? RED : near.length ? ORANGE : GREEN)
+        card('Tỉ lệ khớp sổ', F(accuracy) + '%', `${matchLines}/${counted.length} dòng khớp sổ`, accuracy >= 98 ? GREEN : accuracy >= 95 ? ORANGE : RED),
+        card('Đã kiểm', F(coverage) + '%', `${counted.length}/${items.length} dòng`, coverage === 100 ? GREEN : ORANGE),
+        card('Lệch trọng lượng', signed(Util.round(varW, 1)) + ' kg', `${signed(pct(varW, sysW))}% so với ${kg(sysW)} trên sổ`, Math.abs(varW) < 0.005 ? GREEN : RED),
+        card('Hết hạn / sắp hết hạn', String(expired.length + near.length), `${expired.length} hết hạn · ${near.length} sắp hết hạn`, expired.length ? RED : near.length ? ORANGE : GREEN)
       ], columnGap: 12, margin: [0, 0, 0, 16]
     });
     content.push({
       columns: [
         { width: '*', stack: [
-          { text: 'PHÁT HIỆN CHÍNH', bold: true, color: GREEN, fontSize: 11, margin: [0, 0, 0, 6] },
+          { text: 'KẾT QUẢ CHÍNH', bold: true, color: GREEN, fontSize: 11, margin: [0, 0, 0, 6] },
           { ul: findings, fontSize: 10, color: DARK, lineHeight: 1.25 }
         ] },
         { width: '*', stack: [
-          { text: 'HÀNH ĐỘNG ĐỀ XUẤT', bold: true, color: ACCENT, fontSize: 11, margin: [0, 0, 0, 6] },
+          { text: 'VIỆC CẦN LÀM', bold: true, color: ACCENT, fontSize: 11, margin: [0, 0, 0, 6] },
           { ol: actions.slice(0, 5).map(a => `${a.action} (${a.owner}, trước ${Util.vnDate(a.due)})`), fontSize: 10, color: DARK, lineHeight: 1.25 }
         ] }
       ], columnGap: 24
@@ -392,12 +392,12 @@ const Reports = (function () {
         varW: c.reduce((a, i) => a + i.var.wgh, 0), diff: c.filter(isDiff).length
       };
     });
-    content.push(slide('02', 'Kết quả theo kho', `${whs.length} kho được kiểm. Biểu đồ bên phải cho thấy chênh lệch trọng lượng (kg) của từng kho so với sổ sách.`));
+    content.push(slide('02', 'Kết quả theo kho', `Đã kiểm ${whs.length} kho. Biểu đồ bên phải: số kg lệch của từng kho so với sổ.`));
     // Biểu đồ thanh: mỗi kho một hàng, thanh lệch trái (thiếu, đỏ) hoặc phải (thừa, xanh) quanh trục 0
     const maxAbs = Math.max(0.01, ...whs.map(w => Math.abs(w.varW)));
     const barW = 150, mid = barW / 2;
     const chart = { width: 290, stack: [
-      { text: 'Chênh lệch trọng lượng theo kho (kg)', bold: true, fontSize: 9, color: DARK, margin: [0, 0, 0, 8] },
+      { text: 'Số kg lệch theo kho', bold: true, fontSize: 9, color: DARK, margin: [0, 0, 0, 8] },
       ...whs.map(w => {
         const len = Math.max(1.5, Math.abs(w.varW) / maxAbs * (mid - 4));
         const col = Math.abs(w.varW) < 0.005 ? '#b0bec5' : (w.varW > 0 ? BLUE : RED);
@@ -415,7 +415,7 @@ const Reports = (function () {
     ] };    content.push({
       columns: [
         { width: '*', table: { headerRows: 1, widths: ['*', 34, 52, 52, 56, 56, 52], body: [
-          ['Kho', 'Dòng', 'SL sổ sách', 'SL thực tế', 'KL sổ sách', 'KL thực tế', 'CL KL'].map(th),
+          ['Kho', 'Dòng', 'SL sổ', 'SL thực tế', 'KL sổ', 'KL thực tế', 'Lệch KL'].map(th),
           ...whs.map(w => [
             { text: w.wh, fontSize: 8.5 }, { text: `${w.counted}/${w.lines}`, alignment: 'right', fontSize: 8.5 },
             { text: F(w.sysQ), alignment: 'right', fontSize: 8.5 }, { text: F(w.actQ), alignment: 'right', fontSize: 8.5 },
@@ -432,19 +432,19 @@ const Reports = (function () {
     });
 
     // ===== 4. Chênh lệch & hạn dùng =====
-    content.push(slide('03', 'Chênh lệch và hạn sử dụng', diff.length ? `Các dòng chênh lệch xếp theo mức chênh lệch trọng lượng lớn nhất.` : 'Không có dòng chênh lệch.'));
+    content.push(slide('03', 'Hàng lệch sổ và hạn sử dụng', diff.length ? 'Xếp theo số kg lệch, nhiều nhất ở trên.' : 'Không có dòng lệch sổ.'));
     const topDiff = diff.slice(0, 10);
     const expAll = expired.concat(near).slice(0, 10);
     content.push({
       columns: [
         { width: '*', stack: [
-          { text: `HÀNG CHÊNH LỆCH (${diff.length})`, bold: true, color: GREEN, fontSize: 10, margin: [0, 0, 0, 6] },
+          { text: `HÀNG LỆCH SỔ (${diff.length})`, bold: true, color: GREEN, fontSize: 10, margin: [0, 0, 0, 6] },
           topDiff.length ? { table: { headerRows: 1, widths: [44, '*', 66, 38, 50], body: [
-            ['Mã', 'Tên hàng', 'Lô', 'CL SL', 'CL KL'].map(th),
+            ['Mã', 'Tên hàng', 'Lô', 'Lệch SL', 'Lệch KL'].map(th),
             ...topDiff.map(i => [{ text: i.code, fontSize: 8 }, { text: i.name, fontSize: 8 }, { text: i.lot, fontSize: 7.5 },
               { text: signed(i.var.qty), alignment: 'right', fontSize: 8, color: i.var.qty < 0 ? RED : BLUE, bold: true },
               { text: signed(i.var.wgh), alignment: 'right', fontSize: 8, color: i.var.wgh < 0 ? RED : BLUE, bold: true }])
-          ] }, layout: tableLayout } : P('Không có chênh lệch.', { italics: true, color: MUTED }),
+          ] }, layout: tableLayout } : P('Không có hàng lệch sổ.', { italics: true, color: MUTED }),
           diff.length > topDiff.length ? P(`… và ${diff.length - topDiff.length} dòng khác (xem biên bản).`, { fontSize: 8, color: MUTED }) : ''
         ] },
         { width: '*', stack: [
@@ -454,7 +454,7 @@ const Reports = (function () {
             ...expAll.map(i => [{ text: i.code, fontSize: 8 }, { text: i.name, fontSize: 8 }, { text: Util.vnDate(i.exp.expDate), fontSize: 8 },
               { text: F(i.actualQty != null ? i.actualQty : i.sysQty), alignment: 'right', fontSize: 8 },
               { text: i.exp.label, fontSize: 7.5, bold: true, color: i.exp.status === 'expired' ? RED : ORANGE }])
-          ] }, layout: tableLayout } : P('Không có hàng hết hạn / sắp hết hạn.', { italics: true, color: MUTED })
+          ] }, layout: tableLayout } : P('Không có hàng hết hạn hoặc sắp hết hạn.', { italics: true, color: MUTED })
         ] }
       ], columnGap: 20
     });
@@ -462,8 +462,8 @@ const Reports = (function () {
     // ===== 5. Biên bản kiểm kê có chữ ký: 2 trang biên bản trên một slide =====
     const mins = opts.minutesImages || [];
     for (let i = 0; i < Math.max(1, mins.length); i += 2) {
-      content.push(slide('04', 'Biên bản kiểm kê (có chữ ký)', i === 0 ? `Biên bản số ${docNo(s)}, ${mins.length} trang, ký xác nhận trên ứng dụng.` : '', false));
-      if (!mins.length) { content.push(P('Xem file biên bản kiểm kê đã ký kèm theo: ' + fileNames(s).signed, { italics: true })); break; }
+      content.push(slide('04', 'Biên bản kiểm kê đã ký', i === 0 ? `Biên bản số ${docNo(s)}, ${mins.length} trang, ký trên app.` : '', false));
+      if (!mins.length) { content.push(P('Xem file biên bản đã ký gửi kèm: ' + fileNames(s).signed, { italics: true })); break; }
       content.push({
         columns: mins.slice(i, i + 2).map(img => ({ width: '*', image: img, fit: [(CW - 16) / 2, H - TOP - 120], alignment: 'center' })),
         columnGap: 16
@@ -474,8 +474,8 @@ const Reports = (function () {
     const scene = [];
     if (s.checkIn) scene.push({ data: s.checkIn.data, caption: `Bắt đầu – ${Stamp.dt(new Date(s.checkIn.time))} – ${Geo.fmt(s.checkIn.geo)}` });
     if (s.checkOut) scene.push({ data: s.checkOut.data, caption: `Kết thúc – ${Stamp.dt(new Date(s.checkOut.time))} – ${Geo.fmt(s.checkOut.geo)}` });
-    (s.generalPhotos || []).forEach(g => scene.push({ data: g.data, caption: g.caption || 'Hình ảnh hiện trường' }));
-    content.push(slide('05', 'Hình ảnh nội dung kiểm kê', 'Ảnh xác nhận có mặt và hiện trường, có in ngày giờ, nhà máy, địa chỉ và toạ độ GPS.'));
+    (s.generalPhotos || []).forEach(g => scene.push({ data: g.data, caption: g.caption || 'Ảnh tại kho' }));
+    content.push(slide('05', 'Ảnh kiểm kê', 'Ảnh lúc bắt đầu, kết thúc và tại kho, có ngày giờ và vị trí GPS.'));
     if (scene.length) content.push(...photoGrid(scene, 3, 175)); else content.push(P('Không có ảnh.', { italics: true, color: MUTED }));
 
     // ===== 7. Hình ảnh sản phẩm kiểm kho =====
@@ -494,19 +494,19 @@ const Reports = (function () {
     const productPhotos = [];
     items.filter(it => !issueIds.has(it.id) && (it.photos || []).length).forEach(it =>
       it.photos.forEach(ph => productPhotos.push({ data: ph, caption: `${it.code} – ${it.name} – Lô ${it.lot}` })));
-    content.push(slide('06', 'Hình ảnh sản phẩm kiểm kho', 'Một số sản phẩm được chụp trong quá trình kiểm đếm.'));
+    content.push(slide('06', 'Ảnh sản phẩm', 'Một số sản phẩm chụp lúc kiểm đếm.'));
     if (productPhotos.length) content.push(...photoGrid(productPhotos, 3, 175));
-    else content.push(P('Không có ảnh sản phẩm (ảnh hàng có vấn đề nằm ở mục tiếp theo).', { italics: true, color: MUTED }));
+    else content.push(P('Không có ảnh sản phẩm (ảnh hàng cần lưu ý ở mục sau).', { italics: true, color: MUTED }));
 
-    // ===== 8. Vấn đề phát sinh =====
-    content.push(slide('07', 'Vấn đề phát sinh', issues.length ? `${issues.length} dòng hàng cần lưu ý, kèm ghi chú và hình ảnh.` : 'Không có vấn đề phát sinh.'));
+    // ===== 8. Hàng cần lưu ý =====
+    content.push(slide('07', 'Hàng cần lưu ý', issues.length ? `${issues.length} dòng hàng cần lưu ý, kèm ghi chú và ảnh.` : 'Không có hàng cần lưu ý.'));
     const issueCard = it => {
       const v = it.var;
       return { stack: [
         { text: [{ text: `${it.code} – ${it.name}  `, bold: true, fontSize: 10, color: DARK },
           ...issueTags(it).flatMap(([t, c]) => [{ text: ` ${t} `, color: '#fff', background: c, bold: true, fontSize: 7.5 }, ' '])] },
         { text: `Lô ${it.lot} · ${it.warehouse} · HSD ${Util.vnDate(it.exp.expDate)} (${it.exp.label})`, fontSize: 7.5, color: MUTED, margin: [0, 2, 0, 2] },
-        v ? { text: `Sổ sách ${F(it.sysQty)} / ${F(it.sysWgh)} kg   |   Thực tế ${F(it.actualQty)} / ${F(it.aWgh)} kg   |   CL ${signed(v.qty)} / ${signed(v.wgh)} kg`, fontSize: 8.5 } : { text: 'Chưa kiểm', fontSize: 8.5, color: MUTED },
+        v ? { text: `Sổ ${F(it.sysQty)} / ${F(it.sysWgh)} kg   |   Thực tế ${F(it.actualQty)} / ${F(it.aWgh)} kg   |   Lệch ${signed(v.qty)} / ${signed(v.wgh)} kg`, fontSize: 8.5 } : { text: 'Chưa kiểm', fontSize: 8.5, color: MUTED },
         it.note ? { text: [{ text: 'Ghi chú: ', bold: true }, it.note], fontSize: 8.5, margin: [0, 2, 0, 0] } : '',
         (it.photos || []).length ? { columns: it.photos.slice(0, 3).map(ph => ({ image: ph, fit: [110, 85] })), columnGap: 6, margin: [0, 4, 0, 0] } : ''
       ], margin: [0, 0, 0, 10], unbreakable: true };
@@ -516,13 +516,13 @@ const Reports = (function () {
         content.push({ columns: [issueCard(issues[i]), issues[i + 1] ? issueCard(issues[i + 1]) : { text: '' }], columnGap: 20 });
       }
     }
-    if (unknown) content.push(P(`Tem không có trong tồn sổ sách (${unknown}): ` + s.unknownScans.map(u => u.text).join(' · '), { fontSize: 8, color: RED }));
+    if (unknown) content.push(P(`Tem không có trong sổ (${unknown}): ` + s.unknownScans.map(u => u.text).join(' · '), { fontSize: 8, color: RED }));
     if (uncounted.length) content.push(P(`Chưa kiểm (${uncounted.length}): ` + uncounted.map(i => `${i.code}/${i.lot}`).join(', '), { fontSize: 8, color: MUTED }));
 
     // ===== 9. Kế hoạch hành động & kết luận =====
-    content.push(slide('08', 'Kết luận và kế hoạch hành động', 'Các việc cần làm sau kiểm kê, người phụ trách và thời hạn đề xuất.'));
+    content.push(slide('08', 'Kết luận và việc cần làm', 'Việc cần làm sau kiểm kê, ai phụ trách, hạn hoàn thành.'));
     content.push({ table: { headerRows: 1, widths: [20, '*', '*', 110, 70], body: [
-      ['#', 'Vấn đề', 'Hành động', 'Phụ trách', 'Thời hạn'].map(th),
+      ['#', 'Vấn đề', 'Việc cần làm', 'Phụ trách', 'Hạn'].map(th),
       ...actions.map((a, i) => [{ text: i + 1, fontSize: 9 }, { text: a.issue, fontSize: 9 }, { text: a.action, fontSize: 9 }, { text: a.owner, fontSize: 9 }, { text: Util.vnDate(a.due), fontSize: 9, bold: true }])
     ] }, layout: tableLayout, margin: [0, 0, 0, 12] });
     content.push({
@@ -548,8 +548,7 @@ const Reports = (function () {
       { canvas: [{ type: 'rect', x: 0, y: 0, w: W, h: H, color: GREEN }, { type: 'rect', x: 0, y: H - 70, w: W, h: 6, color: ACCENT }], absolutePosition: { x: 0, y: 0 } },
       logo ? { canvas: [{ type: 'rect', x: 0, y: 0, w: 280, h: 86, r: 10, color: '#ffffff' }], absolutePosition: { x: 60, y: 70 } } : '',
       logo ? { image: 'logo', fit: [250, 66], absolutePosition: { x: 75, y: 80 } } : '',
-      { text: 'THANK YOU', color: '#ffffff', fontSize: 60, bold: true, absolutePosition: { x: 60, y: 220 } },
-      { text: 'Xin cảm ơn!', color: '#ffe0a8', fontSize: 20, absolutePosition: { x: 64, y: 300 } },
+      { text: 'XIN CẢM ƠN', color: '#ffffff', fontSize: 60, bold: true, absolutePosition: { x: 60, y: 230 } },
       { text: s.companyName, color: '#ffffff', fontSize: 11, bold: true, absolutePosition: { x: 64, y: 360 } },
       { text: `${s.factory.name} · ${Util.vnDate(s.countDate)} · ${docNo(s)}`, color: '#d6f5e1', fontSize: 10, absolutePosition: { x: 64, y: 378 } }
     );
@@ -568,13 +567,13 @@ const Reports = (function () {
       const list = [];
       const short = diff.filter(i => i.var.qty < 0 || (i.var.qty === 0 && i.var.wgh < 0));
       const over = diff.filter(i => i.var.qty > 0 || (i.var.qty === 0 && i.var.wgh > 0));
-      if (short.length) list.push({ issue: `${short.length} dòng thiếu (${signed(Util.round(short.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Đối chiếu phiếu xuất/nhập, giải trình nguyên nhân, điều chỉnh sổ sau khi được duyệt', owner: 'Thủ kho + Kế toán', due: d(2) });
-      if (over.length) list.push({ issue: `${over.length} dòng thừa (${signed(Util.round(over.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Kiểm tra chứng từ nhập chưa ghi sổ, nhập bổ sung vào hệ thống', owner: 'Thủ kho + Kế toán', due: d(2) });
-      if (expired.length) list.push({ issue: `${expired.length} dòng đã hết hạn`, action: 'Cách ly hàng, lập biên bản xử lý / hủy', owner: 'QA + Quản lý kho', due: d(1) });
-      if (near.length) list.push({ issue: `${near.length} dòng sắp hết hạn`, action: 'Ưu tiên xuất trước (FEFO), báo bộ phận bán hàng', owner: 'Quản lý kho', due: d(1) });
-      if (uncounted.length) list.push({ issue: `${uncounted.length} dòng chưa kiểm`, action: 'Kiểm bổ sung và cập nhật biên bản', owner: 'Kế toán', due: d(1) });
-      if (unknown) list.push({ issue: `${unknown} tem không có trong tồn`, action: 'Xác minh tem, kiểm tra hàng chưa nhập hệ thống', owner: 'Thủ kho', due: d(2) });
-      if (!list.length) list.push({ issue: 'Không có chênh lệch', action: 'Duy trì quy trình quản lý kho hiện tại, kiểm kê định kỳ', owner: 'Quản lý kho', due: d(30) });
+      if (short.length) list.push({ issue: `${short.length} dòng thiếu (${signed(Util.round(short.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Đối chiếu phiếu nhập/xuất, giải trình lý do, điều chỉnh sổ khi được duyệt', owner: 'Thủ kho + Kế toán', due: d(2) });
+      if (over.length) list.push({ issue: `${over.length} dòng thừa (${signed(Util.round(over.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Tìm phiếu nhập chưa ghi sổ, nhập bổ sung vào hệ thống', owner: 'Thủ kho + Kế toán', due: d(2) });
+      if (expired.length) list.push({ issue: `${expired.length} dòng hết hạn`, action: 'Để riêng hàng, lập biên bản xử lý hoặc hủy', owner: 'QA + Quản lý kho', due: d(1) });
+      if (near.length) list.push({ issue: `${near.length} dòng sắp hết hạn`, action: 'Xuất trước hàng gần hết hạn, báo bộ phận bán hàng', owner: 'Quản lý kho', due: d(1) });
+      if (uncounted.length) list.push({ issue: `${uncounted.length} dòng chưa kiểm`, action: 'Kiểm bổ sung, cập nhật biên bản', owner: 'Kế toán', due: d(1) });
+      if (unknown) list.push({ issue: `${unknown} tem không có trong sổ`, action: 'Kiểm tra lại tem, xem hàng đã nhập hệ thống chưa', owner: 'Thủ kho', due: d(2) });
+      if (!list.length) list.push({ issue: 'Không có hàng lệch sổ', action: 'Giữ cách quản lý kho hiện tại, kiểm kê định kỳ', owner: 'Quản lý kho', due: d(30) });
       return list;
     }
   }
@@ -614,7 +613,7 @@ const Reports = (function () {
       'Mã hàng': it.code, 'Tên hàng': it.name, 'Số lô': it.lot, 'Lần': i + 1, 'SL': w.qty, 'KL (kg)': w.wgh,
       'Nguồn': w.src === 'scan' ? 'Quét tem' : 'Cân tay', 'KL ước tính': w.estimated ? 'x' : '', 'Thời gian': Util.vnDateTime(w.time), 'Nội dung tem': w.tag || ''
     })));
-    (s.unknownScans || []).forEach(u => log.push({ 'Mã hàng': '?', 'Tên hàng': 'Tem không có trong tồn', 'Thời gian': Util.vnDateTime(u.time), 'Nội dung tem': u.text }));
+    (s.unknownScans || []).forEach(u => log.push({ 'Mã hàng': '?', 'Tên hàng': 'Tem không có trong sổ', 'Thời gian': Util.vnDateTime(u.time), 'Nội dung tem': u.text }));
     if (log.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(log), 'CacLanCanQuet');
     const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

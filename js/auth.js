@@ -182,6 +182,17 @@ const Auth = (function () {
     return true;
   }
 
+  // Sửa tên hiển thị / đặt mật khẩu mới (để trống mật khẩu = giữ nguyên), không phải xóa đi tạo lại
+  async function updateLocalUser(email, name, password) {
+    const users = Config.get().localUsers;
+    const u = users.find(x => x.email === email);
+    if (!u) throw new Error('Không tìm thấy tài khoản ' + email);
+    if (password && password.length < 4) throw new Error('Mật khẩu cần ít nhất 4 ký tự');
+    const patch = { name: String(name || '').trim() || u.name, updatedAt: new Date().toISOString() };
+    if (password) patch.hash = await Util.sha256(email + '|' + password);
+    Config.save({ localUsers: users.map(x => x.email === email ? Object.assign({}, x, patch) : x) });
+  }
+
   function removeLocalUser(email) {
     Config.save({ localUsers: Config.get().localUsers.filter(x => x.email !== email) });
   }
@@ -215,5 +226,5 @@ const Auth = (function () {
     }
   }
 
-  return { init, useMicrosoft, currentUser, lastEmail, needsRelogin, logoutLocal, loginMicrosoft, loginLocal, addLocalUser, removeLocalUser, setRole, role, roleOf, can, refreshUser, ROLES, logout, getToken, domainAllowed };
+  return { init, useMicrosoft, currentUser, lastEmail, needsRelogin, logoutLocal, loginMicrosoft, loginLocal, addLocalUser, updateLocalUser, removeLocalUser, setRole, role, roleOf, can, refreshUser, ROLES, logout, getToken, domainAllowed };
 })();
