@@ -192,24 +192,55 @@ const Util = (function () {
     return Promise.resolve(false);
   }
 
-  // Chia sẻ cả bộ file một lần (để lưu vào OneDrive qua app OneDrive).
-  // Chrome Android báo "Permission denied" khi chia sẻ file Excel, nên chỉ chia sẻ các file PDF;
-  // nếu máy vẫn chặn thì tải tất cả file về máy để không mất file. Trả về false nếu máy không hỗ trợ chia sẻ file.
-  function shareMany(list) {
-    const pdfs = list.filter(f => f.blob.type === 'application/pdf').map(f => new File([f.blob], f.name, { type: 'application/pdf' }));
+  // Lưu nhiều ảnh vào máy: điện thoại mở bảng Chia sẻ (chọn "Lưu ảnh" / "Lưu vào Ảnh"),
+  // máy không chia sẻ được nhiều ảnh thì tải về từng ảnh. list: [{ name, blob }]
+  function sharePhotos(list) {
+    const files = list.map(f => new File([f.blob], f.name, { type: f.blob.type || 'image/jpeg' }));
     let ok = false;
-    try { ok = !!(pdfs.length && navigator.canShare && navigator.canShare({ files: pdfs })); } catch (e) { ok = false; }
-    if (!ok) return Promise.resolve(false);
-    return navigator.share({ files: pdfs, title: 'Báo cáo kiểm kê' })
-      .then(() => (pdfs.length < list.length ? 'pdf-only' : true))
-      .catch(e => {
-        if (e.name === 'AbortError') return 'cancel';
-        list.forEach(f => anchorDownload(f.blob, f.name));
-        throw new Error('Máy không cho chia sẻ (' + e.name + '). Đã tải ' + list.length + ' file về thư mục Tải xuống, mở app OneDrive → Tải lên để lưu vào Output.');
-      });
+    try { ok = !!(files.length && navigator.canShare && navigator.canShare({ files })); } catch (e) { ok = false; }
+    if (!ok) { list.forEach(f => anchorDownload(f.blob, f.name)); return Promise.resolve('download'); }
+    return navigator.share({ files, title: 'Ảnh kiểm kê' }).then(() => true).catch(e => {
+      if (e.name === 'AbortError') return false;
+      list.forEach(f => anchorDownload(f.blob, f.name));
+      return 'download';
+    });
+  }
+
+  function dataUrlToBlob(url) {
+    const [head, b64] = String(url).split(',');
+    const bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: (head.match(/data:([^;]+)/) || [])[1] || 'image/jpeg' });
+  }
+
+  // File ZIP không nén (ảnh JPG đã nén sẵn), dùng để tải cả bộ ảnh một lần. files: [{ name, data: Uint8Array }]
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = d => { let c = 0xFFFFFFFF; for (let i = 0; i < d.length; i++) c = CRC[(c ^ d[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  function zip(files) {
+    const enc = new TextEncoder(), parts = [], central = [];
+    let off = 0;
+    const now = new Date();
+    const dosT = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const dosD = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    files.forEach(f => {
+      const name = enc.encode(f.name), crc = crc32(f.data), n = f.data.length;
+      const h = new DataView(new ArrayBuffer(30));
+      [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, dosT, 2], [12, dosD, 2], [14, crc, 4], [18, n, 4], [22, n, 4], [26, name.length, 2], [28, 0, 2]]
+        .forEach(([o, v, s]) => s === 4 ? h.setUint32(o, v, true) : h.setUint16(o, v, true));
+      const c = new DataView(new ArrayBuffer(46));
+      [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, dosT, 2], [14, dosD, 2], [16, crc, 4], [20, n, 4], [24, n, 4], [28, name.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, off, 4]]
+        .forEach(([o, v, s]) => s === 4 ? c.setUint32(o, v, true) : c.setUint16(o, v, true));
+      parts.push(h, name, f.data); central.push(c, name);
+      off += 30 + name.length + n;
+    });
+    const size = central.reduce((a, x) => a + x.byteLength, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    [[0, 0x06054b50, 4], [8, files.length, 2], [10, files.length, 2], [12, size, 4], [16, off, 4]]
+      .forEach(([o, v, s]) => s === 4 ? e.setUint32(o, v, true) : e.setUint16(o, v, true));
+    return new Blob([...parts, ...central, e], { type: 'application/zip' });
   }
 
   const safeName = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\w.-]+/g, '_');
 
-  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, applyWeighs, parseLabel, touch, compressImage, cropImage, readLogo, sha256, download, share, shareMany, openExternal, safeName, isIOS, inAppBrowser, canShareFile };
+  return { pad, isoDate, today, addDays, diffDays, vnDate, vnDateTime, fmt, uid, esc, round, expiry, actualWgh, variance, applyWeighs, parseLabel, touch, compressImage, cropImage, readLogo, sha256, download, share, sharePhotos, dataUrlToBlob, zip, openExternal, safeName, isIOS, inAppBrowser, canShareFile };
 })();

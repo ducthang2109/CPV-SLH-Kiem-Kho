@@ -949,6 +949,7 @@
         <p class="small" id="gps"></p>
         <label class="btn ${s.checkOut ? '' : 'primary'} block">📷 ${s.checkOut ? 'Chụp lại ảnh kết thúc' : 'Chụp ảnh kết thúc'}<input type="file" accept="image/*" capture="user" id="co" hidden></label>
       </div>
+      ${photosCard(s)}
 
       <div class="card">
         <h3>Xem trước</h3>
@@ -1033,6 +1034,7 @@
       renderReview(id);
     });
     $$('[data-grm]').forEach(b => b.onclick = () => { s.generalPhotos.splice(Number(b.dataset.grm), 1); scheduleSave(); renderReview(id); });
+    bindPhotos(s);
     $('#addm').onclick = () => { s.committee.push({ role: 'Ủy viên', title: '', name: '', signature: null }); scheduleSave(); drawCommittee(s); };
     bindSig('rep', () => s.reporterSignature, v => { s.reporterSignature = v; });
     drawCommittee(s);
@@ -1197,6 +1199,41 @@
       : `☁ Đã lưu ${(s.cloud && s.cloud.files || []).length} file lên dữ liệu chung${s.cloud ? ' lúc ' + Util.vnDateTime(s.cloud.at) : ''}. Máy tính đồng bộ tự đưa file vào OneDrive › Apps Kiem Kho › Output, máy khác xem được trong Dashboard.`}</div>`;
   }
 
+  // ---------- tải ảnh đã chụp về máy (ảnh đã đóng dấu ngày giờ, nhà máy, GPS) ----------
+  function photoList(s) {
+    const base = docNoOf(s), out = [];
+    const add = (data, label) => {
+      if (typeof data === 'string' && data.startsWith('data:')) out.push({ data, name: `${base}_${String(out.length + 1).padStart(2, '0')}_${Util.safeName(label).slice(0, 60)}.jpg` });
+    };
+    if (s.checkIn) add(s.checkIn.data, 'BatDau');
+    if (typeOf(s) === 'branch') ((s.checklist || {}).sections || []).forEach(sec => sec.items.forEach(it => (it.photos || []).forEach(p => add(p, `ChiTieu_${sec.no}.${it.no}`))));
+    else (s.items || []).forEach(it => (it.photos || []).forEach(p => add(p, `${it.code}${it.lot ? '_' + it.lot : ''}`)));
+    (s.generalPhotos || []).forEach(g => add(g.data, g.wh ? 'Kho_' + g.wh : 'TaiKho'));
+    if (s.checkOut) add(s.checkOut.data, 'KetThuc');
+    return out;
+  }
+  function photosCard(s) {
+    const n = photoList(s).length;
+    return n ? `<div class="card">
+      <h3>Ảnh đã chụp (${n})</h3>
+      <p class="muted small">Tải ảnh về máy để lưu lại, ảnh có in ngày giờ, nhà máy và vị trí GPS.</p>
+      <div class="row gap">
+        <button class="btn small-btn primary" id="phSave">📥 Lưu ảnh vào máy</button>
+        <button class="btn small-btn" id="phZip">🗜 Tải tất cả (.zip)</button>
+      </div>
+    </div>` : '';
+  }
+  function bindPhotos(s) {
+    const list = () => photoList(s).map(p => ({ name: p.name, blob: Util.dataUrlToBlob(p.data) }));
+    // Gọi chia sẻ ngay trong lần bấm (điện thoại chỉ cho mở bảng chia sẻ khi người dùng vừa bấm)
+    if ($('#phSave')) $('#phSave').onclick = () => Util.sharePhotos(list())
+      .then(r => { if (r === 'download') toast('Đã tải ảnh về thư mục Tải xuống'); }).catch(e => toast(e.message, 'err'));
+    if ($('#phZip')) $('#phZip').onclick = () => guard(async () => {
+      const files = await Promise.all(list().map(async f => ({ name: f.name, data: new Uint8Array(await f.blob.arrayBuffer()) })));
+      await Util.download(Util.zip(files), docNoOf(s) + '_Anh.zip');
+    }, 'Đang gói ảnh...');
+  }
+
   // Ảnh bìa: ảnh chọn riêng cho lần kiểm này, nếu không có thì ảnh mặc định của nhà máy (Cài đặt)
   function coverOf(s) {
     return s.coverPhoto || Covers.get(s.factory.code) || null;
@@ -1305,6 +1342,7 @@
       </div>` : ''}
       ${Util.inAppBrowser ? '<div class="card warn-card small"><b>App đang mở trong Zalo/Facebook/Teams.</b> Các ứng dụng này chặn tải và chia sẻ file. Bấm ⋮ hoặc ⋯ → <b>Mở bằng trình duyệt</b> (Chrome/Safari), hoặc mở app từ biểu tượng trên màn hình chính.</div>' : ''}
       ${cloudStatusCard(s)}
+      ${photosCard(s)}
       ${keys.map(k => [k, FILE_LABELS[k], files[k].name]).map(([k, t, fn]) => `
         <div class="card">
           <b>${t}</b><div class="muted small">${E(fn)}</div>
@@ -1330,6 +1368,7 @@
     $$('[data-dl]').forEach(b => b.onclick = () => doDownload(files[b.dataset.dl]));
     $$('[data-share]').forEach(b => b.onclick = () => doShare(files[b.dataset.share]));
     $$('[data-ext]').forEach(b => b.onclick = () => act(() => Util.openExternal(files[b.dataset.ext].blob)));
+    bindPhotos(s);
     const all = keys.map(k => files[k]);
     if ($('#cloudNow')) $('#cloudNow').onclick = () => guard(async () => { Cloud.enqueue(s.id); const r = await flushCloud(); if (r.failed) toast('Chưa gửi được, kiểm tra mạng hoặc mã kết nối', 'err'); current = null; renderDone(id); }, 'Đang lưu lên dữ liệu chung...');
     if ($('#odall')) $('#odall').onclick = () => guard(async () => {
@@ -1482,6 +1521,7 @@
         <p class="small" id="gps"></p>
         <label class="btn ${s.checkOut ? '' : 'primary'} block">📷 ${s.checkOut ? 'Chụp lại ảnh kết thúc' : 'Chụp ảnh kết thúc'}<input type="file" accept="image/*" capture="user" id="co" hidden></label>
       </div>
+      ${photosCard(s)}
       <div class="card"><h3>Xem trước</h3><button class="btn small-btn" id="pv1">Biên bản kiểm tra</button></div>
       <div class="card">
         <h3>Ký xác nhận</h3>
@@ -1507,6 +1547,7 @@
     };
     if ($('#gotodo')) $('#gotodo').onclick = () => go('#count/' + s.id);
     $('#back2').onclick = () => go('#count/' + s.id);
+    bindPhotos(s);
     geoStatus($('#gps'), s);
     $('#co').onchange = e => {
       const file = e.target.files[0];
