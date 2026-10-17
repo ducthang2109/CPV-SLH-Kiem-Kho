@@ -8,7 +8,7 @@
 #        DongBo_KiemKe.ps1 -Uninstall (go tac vu)
 #        DongBo_KiemKe.ps1 -Watch     (chay nen: co file moi trong Input thi day len ngay)
 #        DongBo_KiemKe.ps1 -InstallWatch (chi cai tac vu theo doi Input)
-param([switch]$Setup, [switch]$Uninstall, [switch]$Watch, [switch]$InstallWatch, [string]$Root)
+param([switch]$Setup, [switch]$Uninstall, [switch]$Watch, [switch]$InstallWatch, [switch]$FixHidden, [string]$Root)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -186,10 +186,24 @@ function Sync-Once([switch]$InputOnly) {
   Log ('Xong: tai ve ' + $got + ' file, day len ' + $sent + ' file')
 }
 
+function Hidden-Action($scriptArgs) {
+  # Chay qua conhost --headless: khong mo cua so nao (Windows Terminal mac dinh van nhay len du co -WindowStyle Hidden)
+  $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+  return New-ScheduledTaskAction -Execute $conhost -Argument ('--headless "' + $ps + '" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath + '" ' + $scriptArgs)
+}
+
+if ($FixHidden) {
+  # Doi 2 tac vu da cai sang chay an hoan toan
+  Set-ScheduledTask -TaskName $TaskName -Action (Hidden-Action ('-Root "' + $Root + '"')) | Out-Null
+  Set-ScheduledTask -TaskName $WatchTaskName -Action (Hidden-Action ('-Watch -Root "' + $Root + '"')) | Out-Null
+  Write-Host 'Da doi 2 tac vu sang chay an.'
+  return
+}
+
 function Install-WatchTask {
   # Tac vu chay an tu luc dang nhap, theo doi thu muc Input va day file moi len ngay
-  $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-  $action = New-ScheduledTaskAction -Execute $ps -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath + '" -Watch -Root "' + $Root + '"')
+  $action = Hidden-Action ('-Watch -Root "' + $Root + '"')
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
   Register-ScheduledTask -TaskName $WatchTaskName -Action $action -Trigger $trigger -Settings $settings -Description 'Theo doi thu muc Input, co file moi thi day len du lieu chung app CPV SLH Kiem Ke ngay' -Force | Out-Null
@@ -235,8 +249,7 @@ if ($Setup) {
   if ($code) { Save-Code $code; Write-Host 'Da luu ma ket noi (ma hoa theo tai khoan Windows nay).' -ForegroundColor Green }
   elseif (-not (Test-Path $CodeFile)) { throw 'Chua nhap ma ket noi.' }
   # Tac vu chay an moi 15 phut khi dang dang nhap Windows
-  $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-  $action = New-ScheduledTaskAction -Execute $ps -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath + '" -Root "' + $Root + '"')
+  $action = Hidden-Action ('-Root "' + $Root + '"')
   $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration (New-TimeSpan -Days 3650)
   $trigger2 = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)

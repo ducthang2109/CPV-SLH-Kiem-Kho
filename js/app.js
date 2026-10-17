@@ -722,7 +722,8 @@
       </div>
       <div class="row gap tools">
         <button class="btn small-btn wbtn">⚖ Cân nhiều lần</button>
-        <label class="btn small-btn">📷 Ảnh<input type="file" accept="image/*" capture="environment" class="photo" hidden multiple></label>
+        <label class="btn small-btn">📷 Chụp<input type="file" accept="image/*" capture="environment" class="photo" hidden multiple></label>
+        <label class="btn small-btn">🖼 Chọn ảnh<input type="file" accept="image/*" class="photo" hidden multiple></label>
         <button class="btn small-btn notebtn">📝 Ghi chú</button>
         ${it.isExtra ? '<button class="btn small-btn del">Xóa dòng</button>' : ''}
       </div>
@@ -755,7 +756,8 @@
       </div>
       <div class="row gap tools">
         <button class="btn small-btn wbtn">➕ Đếm nhiều lần</button>
-        <label class="btn small-btn">📷 Ảnh<input type="file" accept="image/*" capture="environment" class="photo" hidden multiple></label>
+        <label class="btn small-btn">📷 Chụp<input type="file" accept="image/*" capture="environment" class="photo" hidden multiple></label>
+        <label class="btn small-btn">🖼 Chọn ảnh<input type="file" accept="image/*" class="photo" hidden multiple></label>
         <button class="btn small-btn notebtn">📝 Ghi chú</button>
         ${it.isExtra ? '<button class="btn small-btn del">Xóa dòng</button>' : ''}
       </div>
@@ -820,7 +822,7 @@
     });
     el.querySelector('.notebtn').onclick = () => { const n = el.querySelector('.note'); n.hidden = !n.hidden; if (!n.hidden) n.focus(); };
     el.querySelector('.note').oninput = e => { it.note = e.target.value; scheduleSave(); };
-    el.querySelector('.photo').onchange = async e => {
+    $$('.photo', el).forEach(inp => inp.onchange = async e => {
       const files = [...e.target.files];
       await guard(async () => {
         const geo = await Geo.get();
@@ -831,7 +833,7 @@
         await DB.put('sessions', s);
       }, 'Đang lấy vị trí và đóng dấu ảnh...');
       redraw();
-    };
+    });
     $$('[data-rm]', el).forEach(b => b.onclick = () => {
       if (!confirm('Xóa ảnh này?')) return;
       it.photos.splice(Number(b.dataset.rm), 1); scheduleSave();
@@ -914,6 +916,7 @@
         <label>Kho (in dưới tiêu đề)<input id="store" value="${E(s.storeTitle || '')}" placeholder="${E(Reports.storeTitle(Object.assign({}, s, { storeTitle: '' })))}"></label>
         <label>Ý kiến xử lý chênh lệch<textarea id="opinion">${E(s.opinion)}</textarea></label>
         <label>Ghi chú chung<textarea id="gnote">${E(s.generalNote)}</textarea></label>
+        <button class="btn small-btn" id="autoBB">✨ Gợi ý nội dung biên bản từ kết quả</button>
       </div>
 
       <div class="card">
@@ -930,7 +933,10 @@
         <button class="btn small-btn" id="auto">Gợi ý nội dung từ kết quả</button>
         <h4>Ảnh tại kho</h4>
         ${isQtyType(typeOf(s)) ? `<label class="small">Ảnh của kho<select id="gwh"><option value="">Ảnh chung</option>${[...new Set(s.items.map(i => i.warehouse))].map(w => `<option>${E(w)}</option>`).join('')}</select></label>` : ''}
-        <label class="btn small-btn">📷 Thêm ảnh<input type="file" accept="image/*" capture="environment" id="gph" hidden multiple></label>
+        <div class="row gap">
+          <label class="btn small-btn">📷 Chụp ảnh<input type="file" accept="image/*" capture="environment" class="gph" hidden multiple></label>
+          <label class="btn small-btn">🖼 Chọn ảnh có sẵn<input type="file" accept="image/*" class="gph" hidden multiple></label>
+        </div>
         <div class="thumbs">${s.generalPhotos.map((p, i) => `<div class="thumb"><img src="${p.data}" alt=""><button data-grm="${i}">×</button></div>`).join('')}</div>
       </div>
 
@@ -990,7 +996,30 @@
       if (!s.opinion && diff.length) s.opinion = 'Thủ kho giải trình lý do lệch; kế toán điều chỉnh sổ theo kết quả kiểm kê sau khi Giám đốc duyệt.';
       scheduleSave(); renderReview(id);
     };
-    $('#gph').onchange = async e => {
+    // Gợi ý ý kiến xử lý chênh lệch + ghi chú chung từ kết quả kiểm (sửa lại được trước khi ký)
+    $('#autoBB').onclick = () => {
+      if ((s.opinion || s.generalNote) && !confirm('Thay nội dung đang có bằng gợi ý từ kết quả?')) return;
+      const qty = isQtyType(typeOf(s));
+      const amt = list => qty ? `${sg(Util.round(list.reduce((a, i) => a + i.var.qty, 0)))} ${list[0].unit || 'ĐV'}`
+        : `${sg(Util.round(list.reduce((a, i) => a + i.var.wgh, 0), 2))} kg`;
+      const short = diff.filter(i => i.var.qty < 0 || (i.var.qty === 0 && i.var.wgh < 0));
+      const over = diff.filter(i => !short.includes(i));
+      const op = [];
+      if (diff.length) {
+        if (short.length) op.push(`Thiếu ${short.length} dòng (${amt(short)}): ${short.slice(0, 5).map(i => i.code + (i.lot ? ' lô ' + i.lot : '')).join(', ')}${short.length > 5 ? '...' : ''}.`);
+        if (over.length) op.push(`Thừa ${over.length} dòng (${amt(over)}): ${over.slice(0, 5).map(i => i.code + (i.lot ? ' lô ' + i.lot : '')).join(', ')}${over.length > 5 ? '...' : ''}.`);
+        op.push('Thủ kho giải trình lý do lệch trong 2 ngày; kế toán điều chỉnh sổ theo số thực tế sau khi Giám đốc duyệt.');
+      } else op.push('Số thực tế khớp sổ, không cần điều chỉnh.');
+      const note = [`Đã kiểm ${sum.counted}/${sum.lines} dòng tại ${new Set(items.map(i => i.warehouse)).size} kho.`];
+      if (todo.length) note.push(`${todo.length} dòng chưa kiểm, ghi "Chưa kiểm" trên biên bản.`);
+      if (!qty && (sum.expired || sum.near)) note.push(`${sum.expired} dòng hết hạn, ${sum.near} dòng sắp hết hạn: để riêng và xuất trước.`);
+      const extra = items.filter(i => i.isExtra).length;
+      if (extra) note.push(`${extra} dòng hàng ngoài sổ.`);
+      s.opinion = op.join(' '); s.generalNote = note.join(' ');
+      scheduleSave(); renderReview(id);
+      toast('Đã điền gợi ý, anh/chị sửa lại nếu cần');
+    };
+    $$('.gph').forEach(inp => inp.onchange = async e => {
       const files = [...e.target.files];
       await guard(async () => {
         const geo = await Geo.get();
@@ -1002,7 +1031,7 @@
         await DB.put('sessions', s);
       }, 'Đang lấy vị trí và đóng dấu ảnh...');
       renderReview(id);
-    };
+    });
     $$('[data-grm]').forEach(b => b.onclick = () => { s.generalPhotos.splice(Number(b.dataset.grm), 1); scheduleSave(); renderReview(id); });
     $('#addm').onclick = () => { s.committee.push({ role: 'Ủy viên', title: '', name: '', signature: null }); scheduleSave(); drawCommittee(s); };
     bindSig('rep', () => s.reporterSignature, v => { s.reporterSignature = v; });
@@ -1393,7 +1422,8 @@
       <div class="row gap ck-btns">
         <button class="btn small-btn pass ${it.result === 'pass' ? 'on' : ''}">✓ Đạt</button>
         <button class="btn small-btn fail ${it.result === 'fail' ? 'on' : ''}">✕ Không đạt</button>
-        <label class="btn small-btn">📷<input type="file" accept="image/*" capture="environment" class="photo" hidden multiple></label>
+        <label class="btn small-btn" title="Chụp ảnh">📷<input type="file" accept="image/*" capture="environment" class="photo" hidden multiple></label>
+        <label class="btn small-btn" title="Chọn ảnh có sẵn trong máy">🖼<input type="file" accept="image/*" class="photo" hidden multiple></label>
         <button class="btn small-btn notebtn">📝</button>
       </div>
       <textarea class="note" placeholder="Ghi chú / lý do không đạt" ${it.note || it.result === 'fail' ? '' : 'hidden'}>${E(it.note || '')}</textarea>
@@ -1414,7 +1444,7 @@
     el.querySelector('.fail').onclick = () => set('fail');
     el.querySelector('.notebtn').onclick = () => { const n = el.querySelector('.note'); n.hidden = !n.hidden; if (!n.hidden) n.focus(); };
     el.querySelector('.note').oninput = e => { it.note = e.target.value; scheduleSave(); };
-    el.querySelector('.photo').onchange = async e => {
+    $$('.photo', el).forEach(inp => inp.onchange = async e => {
       const files = [...e.target.files];
       await guard(async () => {
         const geo = await Geo.get();
@@ -1423,7 +1453,7 @@
         await DB.put('sessions', s);
       }, 'Đang lấy vị trí và đóng dấu ảnh...');
       redraw();
-    };
+    });
     $$('[data-rm]', el).forEach(b => b.onclick = () => { if (confirm('Xóa ảnh này?')) { it.photos.splice(Number(b.dataset.rm), 1); scheduleSave(); redraw(); } });
   }
 
@@ -1442,6 +1472,7 @@
       <div class="card">
         <h3>Ý kiến của giám đốc</h3>
         <textarea id="opinion">${E(s.opinion)}</textarea>
+        <button class="btn small-btn" id="autoBB">✨ Gợi ý nội dung từ kết quả</button>
       </div>
       <div class="card">
         <h3>Ảnh bắt đầu / kết thúc</h3>
@@ -1462,6 +1493,18 @@
         <button class="btn primary" id="finish">Kết thúc & xuất biên bản</button>
       </div>`;
     $('#opinion').oninput = e => { s.opinion = e.target.value; scheduleSave(); };
+    $('#autoBB').onclick = () => {
+      if (s.opinion && !confirm('Thay nội dung đang có bằng gợi ý từ kết quả?')) return;
+      const op = [`Đạt ${t.pass.length}/${t.pass.length + t.fail.length} chỉ tiêu (${Util.fmt(t.score)}%).`];
+      if (t.fail.length) {
+        op.push('Không đạt: ' + t.fail.map(i => `${i.sec.no}.${i.no} ${i.text}${i.note ? ' (' + i.note + ')' : ''}`).join('; ') + '.');
+        op.push('Đề nghị bộ phận phụ trách khắc phục trong 7 ngày và báo lại kết quả.');
+      } else op.push('Nhà máy đạt yêu cầu, tiếp tục duy trì.');
+      if (t.todo.length) op.push(`${t.todo.length} chỉ tiêu chưa đánh giá.`);
+      s.opinion = op.join(' ');
+      $('#opinion').value = s.opinion; scheduleSave();
+      toast('Đã điền gợi ý, sửa lại nếu cần');
+    };
     if ($('#gotodo')) $('#gotodo').onclick = () => go('#count/' + s.id);
     $('#back2').onclick = () => go('#count/' + s.id);
     geoStatus($('#gps'), s);
