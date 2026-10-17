@@ -217,15 +217,34 @@
       }).join('')}
       ${cfg.factories.length ? '' : '<div class="card">Chưa có nhà máy nào. Vào <a href="#settings">Cài đặt</a> để nạp file Master nhà máy.</div>'}
       <h3 class="section">Lịch sử ${E(TYPES[type].name.toLowerCase())}</h3>
-      ${sessions.filter(s => s.status === 'done').map(s => `
-        <div class="card row between click" data-done="${s.id}">
-          <div><b>${E(s.factory.name)}</b><div class="muted small">${Util.vnDate(s.countDate)} · ${E(docNoOf(s))} · ${E(s.user.name)}</div></div><span>›</span>
-        </div>`).join('') || '<p class="muted">Chưa có.</p>'}`;
+      <div id="hist"></div>`;
+    // Lịch sử: lần kiểm trên máy này + lần kiểm của mọi kế toán trên dữ liệu chung, mới nhất trước
+    const year = String(new Date().getFullYear());
+    const drawHist = cloudList => {
+      const box = $('#hist');
+      if (!box) return;
+      const local = sessions.filter(s => s.status === 'done').map(s => ({ id: s.id, date: s.countDate, factory: s.factory.name, factoryCode: s.factory.code, docNo: docNoOf(s), user: s.user.name, local: true }));
+      const ids = new Set(local.map(h => h.id));
+      const rows = local.concat((cloudList || []).filter(h => h.type === type && h.status === 'done' && !ids.has(h.id)))
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      box.innerHTML = rows.map(h => `
+        <div class="card row between click" ${h.local ? `data-done="${h.id}"` : `data-hist="${E(h.date)}" data-fac="${E(h.factoryCode || '')}"`}>
+          <div><b>${E(h.factory)}</b><div class="muted small">${Util.vnDate(h.date)} · ${E(h.docNo || '')} · ${E(h.user)}${h.local ? '' : ' · ☁'}</div></div><span>›</span>
+        </div>`).join('') || '<p class="muted">Chưa có.</p>';
+      $$('[data-done]', box).forEach(b => b.onclick = () => go('#done/' + b.dataset.done));
+      // Lần kiểm làm trên máy khác: mở Dòng thời gian của Dashboard đúng ngày đó để xem file
+      $$('[data-hist]', box).forEach(b => b.onclick = () => {
+        const d = b.dataset.hist;
+        renderDashboard.state = { year: d.slice(0, 4), month: d.slice(5, 7), type, user: '', factory: b.dataset.fac, status: '', tab: 'feed', focusDay: d };
+        go('#dashboard');
+      });
+    };
+    drawHist(Cloud.enabled() ? Cloud.cachedHistory(year) : []);
+    if (Cloud.enabled()) Cloud.historyYear(year).then(r => { if (location.hash.startsWith('#factories')) drawHist(r.list); });
     $$('[data-import]').forEach(b => b.onclick = () => go('#import/' + b.dataset.import + '/' + type));
     $$('[data-start]').forEach(b => b.onclick = () => startSession(b.dataset.start, type));
     $$('[data-delopen]').forEach(b => b.onclick = () => deleteOpenSession(b.dataset.delopen, () => renderFactories(type)));
     $$('[data-open]').forEach(b => b.onclick = () => go('#count/' + b.dataset.open));
-    $$('[data-done]').forEach(b => b.onclick = () => go('#done/' + b.dataset.done));
   }
 
   // ---------- tải dữ liệu ----------
@@ -1196,7 +1215,8 @@
     const pending = Cloud.queue().includes(s.id) || !s.cloud;
     return `<div class="card small ${pending ? 'warn-card' : 'ok-card'}">${pending
       ? `☁ Chưa lưu lên dữ liệu chung. <button class="btn small-btn" id="cloudNow">Gửi ngay</button>`
-      : `☁ Đã lưu ${(s.cloud && s.cloud.files || []).length} file lên dữ liệu chung${s.cloud ? ' lúc ' + Util.vnDateTime(s.cloud.at) : ''}. Máy tính đồng bộ tự đưa file vào OneDrive › Apps Kiem Kho › Output, máy khác xem được trong Dashboard.`}</div>`;
+      : `☁ Đã lưu ${(s.cloud && s.cloud.files || []).length} file lên dữ liệu chung${s.cloud ? ' lúc ' + Util.vnDateTime(s.cloud.at) : ''}. Máy tính đồng bộ tự đưa file vào OneDrive › Apps Kiem Kho › Output, máy khác xem được trong Dashboard.
+        <br><button class="btn small-btn" id="cloudNow">⟳ Gửi lại file</button> <span class="muted">(khi máy khác báo không mở được file)</span>`}</div>`;
   }
 
   // ---------- tải ảnh đã chụp về máy (ảnh đã đóng dấu ngày giờ, nhà máy, GPS) ----------
@@ -1583,14 +1603,27 @@
   async function renderDashboard() {
     setTitle('Dashboard kiểm kho', '#home');
     const st = renderDashboard.state = renderDashboard.state || { year: String(new Date().getFullYear()), month: String(new Date().getMonth() + 1).padStart(2, '0'), type: '', user: '', factory: '', status: '', view: 'month' };
-    const own = (await DB.all('sessions')).filter(s => s.checkIn || s.status === 'done').map(summaryOf);
+    let own = (await DB.all('sessions')).filter(s => s.checkIn || s.status === 'done').map(summaryOf);
     // Lịch sử chung: hiện ngay bản đã lưu trên máy, rồi tải bản mới nhất
     const cloudList = Cloud.enabled() ? (Cloud.cachedHistory(st.year) || []) : [];
     drawDashboard(own, cloudList, Cloud.enabled() ? 'loading' : 'off');
     if (Cloud.enabled()) {
       const r = await Cloud.historyYear(st.year);
+      if (r.live && await purgeDeleted(st.year, r.list)) own = (await DB.all('sessions')).filter(s => s.checkIn || s.status === 'done').map(summaryOf);
       if (location.hash.startsWith('#dashboard')) drawDashboard(own, r.list, r.live ? 'live' : 'offline', r.at);
     }
+  }
+
+  // Lần kiểm đã hoàn tất và đã gửi lên dữ liệu chung nhưng quản trị viên đã xóa: xóa luôn bản còn trên máy này
+  async function purgeDeleted(year, list) {
+    const ids = new Set(list.map(h => h.id));
+    const gone = (await DB.all('sessions')).filter(s => s.status === 'done' && s.cloud && String(s.countDate).startsWith(year) && !ids.has(s.id) && !Cloud.queue().includes(s.id));
+    for (const s of gone) {
+      await DB.del('sessions', s.id);
+      await DB.del('files', s.id).catch(() => {});
+      await DB.del('files', 'src:' + s.id).catch(() => {});
+    }
+    return gone.length;
   }
 
   function mergeHistory(own, cloudList) {
@@ -2163,6 +2196,10 @@
       else await Cloud.pullConfig();
       if (!Auth.refreshUser()) { toast('Tài khoản của bạn đã bị quản trị viên xóa', 'err'); current = null; return go('#login'); }
       const r = await flushCloud();
+      // Dọn các lần kiểm quản trị viên đã xóa khỏi lịch sử chung
+      const year = String(new Date().getFullYear());
+      const h = await Cloud.historyYear(year);
+      if (h.live) await purgeDeleted(year, h.list);
       if (showToast) toast(`Đã đồng bộ${r.sent ? `, gửi ${r.sent} lần kiểm` : ''}`);
       const page = location.hash.replace(/^#/, '').split('/')[0];
       if (['', 'home', 'login', 'factories'].includes(page)) route();

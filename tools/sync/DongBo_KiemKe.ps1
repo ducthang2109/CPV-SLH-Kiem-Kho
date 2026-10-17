@@ -68,9 +68,13 @@ function Download($path, $dest) {
   $dir = Split-Path -Parent $dest
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
   $h = @{ Authorization = 'Bearer ' + $script:conn.token; Accept = 'application/vnd.github.raw'; 'User-Agent' = 'CPV-SLH-KiemKe-Sync' }
-  $tmp = $dest + '.tmp'
-  Invoke-WebRequest -Uri ('https://api.github.com/repos/' + $script:conn.repo + '/contents/' + (Enc-Path $path) + '?ref=' + $script:conn.branch) -Headers $h -OutFile $tmp -UseBasicParsing
-  Move-Item -Path $tmp -Destination $dest -Force
+  # File tam de ngoai OneDrive (trong %LOCALAPPDATA%): OneDrive khong dong bo file .tmp do dang len may khac
+  $tmp = Join-Path $Data ('dl_' + [Guid]::NewGuid().ToString('N') + '.tmp')
+  try {
+    Invoke-WebRequest -Uri ('https://api.github.com/repos/' + $script:conn.repo + '/contents/' + (Enc-Path $path) + '?ref=' + $script:conn.branch) -Headers $h -OutFile $tmp -UseBasicParsing
+    if ((Get-Item $tmp).Length -eq 0) { throw 'File tai ve rong' }
+    Move-Item -Path $tmp -Destination $dest -Force
+  } finally { if (Test-Path $tmp) { Remove-Item $tmp -Force } }
 }
 function Git-Sha([byte[]]$bytes) {
   $head = [Text.Encoding]::ASCII.GetBytes('blob ' + $bytes.Length + [char]0)
@@ -150,6 +154,22 @@ function Sync-Once([switch]$InputOnly) {
     $known = $state.files.PSObject.Properties[$b.path]
     if ((Test-Path $dest) -and $known -and $known.Value -eq $b.sha) { continue }
     try { Download $b.path $dest; Set-Prop $state.files $b.path $b.sha; $got++; Log ('Tai ve: ' + $rel) } catch { Log ('Loi tai ' + $rel + ': ' + $_.Exception.Message) }
+  }
+
+  # File quan tri vien da xoa tren app (lan kiem bi xoa): xoa ban da tai ve trong Output.
+  # Chi xoa file do script nay tai ve (co trong state), khong dong vao file khac trong Output.
+  $removed = 0
+  if (-not $tree.truncated) {
+    foreach ($k in @($state.files.PSObject.Properties | Where-Object { $_.Name -like 'files/*' -and -not $remote.ContainsKey($_.Name) })) {
+      $rel = $k.Name.Substring(6)
+      $dest = Join-Path $OutDir ($rel -replace '/', '\')
+      try {
+        if (Test-Path $dest) { Remove-Item $dest -Force; Log ('Xoa (da xoa tren app): ' + $rel) }
+        $state.files.PSObject.Properties.Remove($k.Name); $removed++
+        $dir = Split-Path -Parent $dest
+        while ($dir -and $dir.Length -gt $OutDir.Length -and (Test-Path $dir) -and -not (Get-ChildItem $dir -Force)) { Remove-Item $dir -Force; $dir = Split-Path -Parent $dir }
+      } catch { Log ('Loi xoa ' + $rel + ': ' + $_.Exception.Message) }
+    }
   }
 
   # ---------- Lich su kiem -> CSV ----------

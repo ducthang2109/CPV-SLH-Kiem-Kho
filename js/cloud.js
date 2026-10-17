@@ -84,7 +84,7 @@ const Cloud = (function () {
   }
   async function getBlob(path) {
     const r = await req('GET', path, null, 'application/vnd.github.raw');
-    if (!r) throw new Error('Không tìm thấy file trên dữ liệu chung');
+    if (!r) throw new Error('File không còn trên dữ liệu chung (lần kiểm có thể đã bị quản trị viên xóa). Mở lại Dashboard để cập nhật.');
     return r.blob();
   }
 
@@ -172,7 +172,13 @@ const Cloud = (function () {
   }
   // Quản trị viên xóa một lần kiểm thừa: bỏ dòng lịch sử và các file của lần kiểm đó
   async function deleteHistory(rec) {
-    for (const f of rec.files || []) { try { await deleteFile(f.path, `${who()}: xóa ${f.name}`); } catch (e) { console.warn('xóa file', f.path, e); } }
+    // Không xóa file mà lần kiểm khác (trùng số biên bản) vẫn đang dùng
+    const { data } = await getJson(`history/${monthOf(rec.date)}.json`);
+    const keep = new Set([].concat(...((data && data.records) || []).filter(x => x.id !== rec.id).map(x => (x.files || []).map(f => f.path))));
+    for (const f of rec.files || []) {
+      if (keep.has(f.path)) continue;
+      try { await deleteFile(f.path, `${who()}: xóa ${f.name}`); } catch (e) { console.warn('xóa file', f.path, e); }
+    }
     await updateJson(`history/${monthOf(rec.date)}.json`, d => ({ records: ((d && d.records) || []).filter(x => x.id !== rec.id), deleted: ((d && d.deleted) || []).concat({ id: rec.id, docNo: rec.docNo, by: who(), at: new Date().toISOString() }) }),
       `${who()}: xóa lịch sử ${rec.docNo || rec.id}`);
     const key = 'kk_cloud_hist_' + rec.date.slice(0, 4);
@@ -199,7 +205,13 @@ const Cloud = (function () {
 
   // upload(s, files, summary): gửi file + ghi lịch sử. files = { key: { name, blob } }
   async function upload(s, files, rec) {
-    const base = `files/${rec.date.slice(0, 4)}/${rec.date.slice(5, 7)}/${rec.docNo}`;
+    // Hai lần kiểm cùng nhà máy, cùng ngày có cùng số biên bản: lần sau lưu vào thư mục riêng để không ghi đè / xóa nhầm file của nhau
+    const { data } = await getJson(`history/${monthOf(rec.date)}.json`);
+    const recs = (data && data.records) || [];
+    const mine = recs.find(x => x.id === rec.id && (x.files || []).length);
+    const clash = recs.some(x => x.id !== rec.id && x.docNo === rec.docNo);
+    const base = mine ? mine.files[0].path.slice(0, mine.files[0].path.lastIndexOf('/'))
+      : `files/${rec.date.slice(0, 4)}/${rec.date.slice(5, 7)}/${rec.docNo}${clash ? '_' + String(rec.id).slice(-4) : ''}`;
     rec.files = [];
     for (const [k, f] of Object.entries(files || {})) {
       if (!f || !f.blob) continue;

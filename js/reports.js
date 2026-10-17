@@ -242,6 +242,13 @@ const Reports = (function () {
     const P = (t, o = {}) => Object.assign({ text: t, margin: [0, 2, 0, 2] }, o);
     const pct = (a, b) => b ? Math.round(a / b * 1000) / 10 : 0;
     const kg = n => F(Util.round(n, 2)) + ' kg';
+    // Đơn vị tính: của dòng hàng, hoặc đơn vị dùng nhiều nhất của một nhóm dòng
+    const unitOf = list => {
+      const n = {};
+      list.forEach(i => { const u = String(i.unit || '').trim(); if (u) n[u] = (n[u] || 0) + 1; });
+      return Object.keys(n).sort((a, b) => n[b] - n[a])[0] || 'ĐV';
+    };
+    const mainUnit = unitOf(items);
 
     // ---- số liệu tổng hợp ----
     const counted = items.filter(i => i.actualQty != null);
@@ -355,7 +362,7 @@ const Reports = (function () {
     const findings = [];
     findings.push(`Đã kiểm ${counted.length}/${items.length} dòng hàng (${F(coverage)}%) tại ${byWarehouse(items).size} kho.`);
     findings.push(diff.length ? `${diff.length} dòng lệch sổ: số lượng ${signed(Util.round(varQ))}, trọng lượng ${signed(Util.round(varW))} kg (${signed(pct(varW, sysW))}% so với sổ).` : 'Số lượng và trọng lượng thực tế khớp sổ.');
-    if (diff.length) findings.push(`Lệch nhiều nhất: ${diff[0].code} – ${diff[0].name}, lô ${diff[0].lot}: ${signed(diff[0].var.wgh)} kg.`);
+    if (diff.length) findings.push(`Lệch nhiều nhất: ${diff[0].code} – ${diff[0].name}, lô ${diff[0].lot}: ${signed(diff[0].var.qty)} ${unitOf([diff[0]])}, ${signed(diff[0].var.wgh)} kg.`);
     if (expired.length || near.length) findings.push(`${expired.length} dòng hết hạn, ${near.length} dòng sắp hết hạn, cần xử lý trước.`);
     if (uncounted.length) findings.push(`${uncounted.length} dòng chưa kiểm.`);
     if (scans) findings.push(`Đã quét ${scans} tem${unknown ? `, ${unknown} tem không có trong sổ` : ''}.`);
@@ -365,7 +372,7 @@ const Reports = (function () {
       columns: [
         card('Tỉ lệ khớp sổ', F(accuracy) + '%', `${matchLines}/${counted.length} dòng khớp sổ`, accuracy >= 98 ? GREEN : accuracy >= 95 ? ORANGE : RED),
         card('Đã kiểm', F(coverage) + '%', `${counted.length}/${items.length} dòng`, coverage === 100 ? GREEN : ORANGE),
-        card('Lệch trọng lượng', signed(Util.round(varW, 1)) + ' kg', `${signed(pct(varW, sysW))}% so với ${kg(sysW)} trên sổ`, Math.abs(varW) < 0.005 ? GREEN : RED),
+        card('Lệch so với sổ', signed(Util.round(varW, 1)) + ' kg', `Số lượng ${signed(Util.round(varQ))} ${mainUnit} · ${signed(pct(varW, sysW))}% trọng lượng sổ`, Math.abs(varW) < 0.005 && Math.abs(varQ) < 0.0005 ? GREEN : RED),
         card('Hết hạn / sắp hết hạn', String(expired.length + near.length), `${expired.length} hết hạn · ${near.length} sắp hết hạn`, expired.length ? RED : near.length ? ORANGE : GREEN)
       ], columnGap: 12, margin: [0, 0, 0, 16]
     });
@@ -389,15 +396,15 @@ const Reports = (function () {
         wh, lines: list.length, counted: c.length,
         sysQ: list.reduce((a, i) => a + i.sysQty, 0), actQ: c.reduce((a, i) => a + i.actualQty, 0),
         sysW: list.reduce((a, i) => a + i.sysWgh, 0), actW: c.reduce((a, i) => a + i.aWgh, 0),
-        varW: c.reduce((a, i) => a + i.var.wgh, 0), diff: c.filter(isDiff).length
+        varW: c.reduce((a, i) => a + i.var.wgh, 0), varQ: c.reduce((a, i) => a + i.var.qty, 0), diff: c.filter(isDiff).length, unit: unitOf(list)
       };
     });
-    content.push(slide('02', 'Kết quả theo kho', `Đã kiểm ${whs.length} kho. Biểu đồ bên phải: số kg lệch của từng kho so với sổ.`));
+    content.push(slide('02', 'Kết quả theo kho', `Đã kiểm ${whs.length} kho. Bảng có số lượng (${mainUnit}) và trọng lượng (kg); biểu đồ: phần lệch của từng kho so với sổ.`));
     // Biểu đồ thanh: mỗi kho một hàng, thanh lệch trái (thiếu, đỏ) hoặc phải (thừa, xanh) quanh trục 0
     const maxAbs = Math.max(0.01, ...whs.map(w => Math.abs(w.varW)));
-    const barW = 150, mid = barW / 2;
+    const barW = 130, mid = barW / 2;
     const chart = { width: 290, stack: [
-      { text: 'Số kg lệch theo kho', bold: true, fontSize: 9, color: DARK, margin: [0, 0, 0, 8] },
+      { text: 'Lệch theo kho (kg · số lượng)', bold: true, fontSize: 9, color: DARK, margin: [0, 0, 0, 8] },
       ...whs.map(w => {
         const len = Math.max(1.5, Math.abs(w.varW) / maxAbs * (mid - 4));
         const col = Math.abs(w.varW) < 0.005 ? '#b0bec5' : (w.varW > 0 ? BLUE : RED);
@@ -408,24 +415,26 @@ const Reports = (function () {
             { type: 'line', x1: mid, y1: -2, x2: mid, y2: 22, lineWidth: 1, lineColor: MUTED },
             { type: 'rect', x: w.varW >= 0 ? mid : mid - len, y: 4, w: len, h: 12, color: col }
           ] },
-          { width: '*', text: signed(Util.round(w.varW, 2)), fontSize: 8, bold: true, color: col, margin: [4, 4, 0, 0] }
+          { width: '*', stack: [{ text: signed(Util.round(w.varW, 2)) + ' kg', fontSize: 8, bold: true, color: col }, { text: `${signed(Util.round(w.varQ))} ${w.unit}`, fontSize: 7, color: MUTED }], margin: [4, 1, 0, 0] }
         ], columnGap: 4, margin: [0, 0, 0, 8] };
       }),
       { columns: [{ width: 100, text: '' }, { width: barW, columns: [{ text: '‹ thiếu', fontSize: 7, color: RED }, { text: 'thừa ›', fontSize: 7, color: BLUE, alignment: 'right' }] }], margin: [0, 2, 0, 0] }
     ] };    content.push({
       columns: [
-        { width: '*', table: { headerRows: 1, widths: ['*', 34, 52, 52, 56, 56, 52], body: [
-          ['Kho', 'Dòng', 'SL sổ', 'SL thực tế', 'KL sổ', 'KL thực tế', 'Lệch KL'].map(th),
+        { width: '*', table: { headerRows: 1, widths: ['*', 30, 30, 42, 42, 40, 48, 48, 44], body: [
+          ['Kho', 'Dòng', 'ĐVT', 'SL sổ', 'SL thực tế', 'Lệch SL', 'KL sổ (kg)', 'KL thực tế', 'Lệch KL'].map(th),
           ...whs.map(w => [
-            { text: w.wh, fontSize: 8.5 }, { text: `${w.counted}/${w.lines}`, alignment: 'right', fontSize: 8.5 },
-            { text: F(w.sysQ), alignment: 'right', fontSize: 8.5 }, { text: F(w.actQ), alignment: 'right', fontSize: 8.5 },
-            { text: F(Util.round(w.sysW, 2)), alignment: 'right', fontSize: 8.5 }, { text: F(Util.round(w.actW, 2)), alignment: 'right', fontSize: 8.5 },
-            { text: signed(Util.round(w.varW, 2)), alignment: 'right', fontSize: 8.5, bold: true, color: Math.abs(w.varW) < 0.005 ? DARK : (w.varW > 0 ? BLUE : RED) }
+            { text: w.wh, fontSize: 8 }, { text: `${w.counted}/${w.lines}`, alignment: 'right', fontSize: 8 }, { text: w.unit, alignment: 'center', fontSize: 8 },
+            { text: F(w.sysQ), alignment: 'right', fontSize: 8 }, { text: F(w.actQ), alignment: 'right', fontSize: 8 },
+            { text: signed(Util.round(w.varQ)), alignment: 'right', fontSize: 8, bold: true, color: Math.abs(w.varQ) < 0.0005 ? DARK : (w.varQ > 0 ? BLUE : RED) },
+            { text: F(Util.round(w.sysW, 2)), alignment: 'right', fontSize: 8 }, { text: F(Util.round(w.actW, 2)), alignment: 'right', fontSize: 8 },
+            { text: signed(Util.round(w.varW, 2)), alignment: 'right', fontSize: 8, bold: true, color: Math.abs(w.varW) < 0.005 ? DARK : (w.varW > 0 ? BLUE : RED) }
           ]),
-          [{ text: 'Tổng cộng', bold: true, fontSize: 8.5 }, { text: `${counted.length}/${items.length}`, alignment: 'right', bold: true, fontSize: 8.5 },
-            { text: F(sum.sysQty), alignment: 'right', bold: true, fontSize: 8.5 }, { text: F(sum.actQty), alignment: 'right', bold: true, fontSize: 8.5 },
-            { text: F(Util.round(sum.sysWgh, 2)), alignment: 'right', bold: true, fontSize: 8.5 }, { text: F(Util.round(sum.actWgh, 2)), alignment: 'right', bold: true, fontSize: 8.5 },
-            { text: signed(Util.round(varW, 2)), alignment: 'right', bold: true, fontSize: 8.5 }]
+          [{ text: 'Tổng cộng', bold: true, fontSize: 8 }, { text: `${counted.length}/${items.length}`, alignment: 'right', bold: true, fontSize: 8 }, { text: mainUnit, alignment: 'center', bold: true, fontSize: 8 },
+            { text: F(sum.sysQty), alignment: 'right', bold: true, fontSize: 8 }, { text: F(sum.actQty), alignment: 'right', bold: true, fontSize: 8 },
+            { text: signed(Util.round(varQ)), alignment: 'right', bold: true, fontSize: 8 },
+            { text: F(Util.round(sum.sysWgh, 2)), alignment: 'right', bold: true, fontSize: 8 }, { text: F(Util.round(sum.actWgh, 2)), alignment: 'right', bold: true, fontSize: 8 },
+            { text: signed(Util.round(varW, 2)), alignment: 'right', bold: true, fontSize: 8 }]
         ] }, layout: tableLayout },
         chart
       ], columnGap: 24
@@ -439,9 +448,9 @@ const Reports = (function () {
       columns: [
         { width: '*', stack: [
           { text: `HÀNG LỆCH SỔ (${diff.length})`, bold: true, color: GREEN, fontSize: 10, margin: [0, 0, 0, 6] },
-          topDiff.length ? { table: { headerRows: 1, widths: [44, '*', 66, 38, 50], body: [
-            ['Mã', 'Tên hàng', 'Lô', 'Lệch SL', 'Lệch KL'].map(th),
-            ...topDiff.map(i => [{ text: i.code, fontSize: 8 }, { text: i.name, fontSize: 8 }, { text: i.lot, fontSize: 7.5 },
+          topDiff.length ? { table: { headerRows: 1, widths: [44, '*', 60, 30, 36, 50], body: [
+            ['Mã', 'Tên hàng', 'Lô', 'ĐVT', 'Lệch SL', 'Lệch KL (kg)'].map(th),
+            ...topDiff.map(i => [{ text: i.code, fontSize: 8 }, { text: i.name, fontSize: 8 }, { text: i.lot, fontSize: 7.5 }, { text: unitOf([i]), fontSize: 7.5, alignment: 'center' },
               { text: signed(i.var.qty), alignment: 'right', fontSize: 8, color: i.var.qty < 0 ? RED : BLUE, bold: true },
               { text: signed(i.var.wgh), alignment: 'right', fontSize: 8, color: i.var.wgh < 0 ? RED : BLUE, bold: true }])
           ] }, layout: tableLayout } : P('Không có hàng lệch sổ.', { italics: true, color: MUTED }),
@@ -449,10 +458,11 @@ const Reports = (function () {
         ] },
         { width: '*', stack: [
           { text: `HẠN SỬ DỤNG (${expired.length} hết hạn · ${near.length} sắp hết hạn)`, bold: true, color: ACCENT, fontSize: 10, margin: [0, 0, 0, 6] },
-          expAll.length ? { table: { headerRows: 1, widths: [44, '*', 52, 50, 70], body: [
-            ['Mã', 'Tên hàng', 'HSD', 'SL', 'Tình trạng'].map(th),
+          expAll.length ? { table: { headerRows: 1, widths: [44, '*', 50, 34, 30, 44, 62], body: [
+            ['Mã', 'Tên hàng', 'HSD', 'SL', 'ĐVT', 'KL (kg)', 'Tình trạng'].map(th),
             ...expAll.map(i => [{ text: i.code, fontSize: 8 }, { text: i.name, fontSize: 8 }, { text: Util.vnDate(i.exp.expDate), fontSize: 8 },
-              { text: F(i.actualQty != null ? i.actualQty : i.sysQty), alignment: 'right', fontSize: 8 },
+              { text: F(i.actualQty != null ? i.actualQty : i.sysQty), alignment: 'right', fontSize: 8 }, { text: unitOf([i]), alignment: 'center', fontSize: 7.5 },
+              { text: F(Util.round(i.actualQty != null ? i.aWgh : i.sysWgh, 2)), alignment: 'right', fontSize: 8 },
               { text: i.exp.label, fontSize: 7.5, bold: true, color: i.exp.status === 'expired' ? RED : ORANGE }])
           ] }, layout: tableLayout } : P('Không có hàng hết hạn hoặc sắp hết hạn.', { italics: true, color: MUTED })
         ] }
@@ -506,7 +516,7 @@ const Reports = (function () {
         { text: [{ text: `${it.code} – ${it.name}  `, bold: true, fontSize: 10, color: DARK },
           ...issueTags(it).flatMap(([t, c]) => [{ text: ` ${t} `, color: '#fff', background: c, bold: true, fontSize: 7.5 }, ' '])] },
         { text: `Lô ${it.lot} · ${it.warehouse} · HSD ${Util.vnDate(it.exp.expDate)} (${it.exp.label})`, fontSize: 7.5, color: MUTED, margin: [0, 2, 0, 2] },
-        v ? { text: `Sổ ${F(it.sysQty)} / ${F(it.sysWgh)} kg   |   Thực tế ${F(it.actualQty)} / ${F(it.aWgh)} kg   |   Lệch ${signed(v.qty)} / ${signed(v.wgh)} kg`, fontSize: 8.5 } : { text: 'Chưa kiểm', fontSize: 8.5, color: MUTED },
+        v ? { text: `Sổ ${F(it.sysQty)} ${unitOf([it])} / ${F(it.sysWgh)} kg   |   Thực tế ${F(it.actualQty)} ${unitOf([it])} / ${F(it.aWgh)} kg   |   Lệch ${signed(v.qty)} ${unitOf([it])} / ${signed(v.wgh)} kg`, fontSize: 8.5 } : { text: 'Chưa kiểm', fontSize: 8.5, color: MUTED },
         it.note ? { text: [{ text: 'Ghi chú: ', bold: true }, it.note], fontSize: 8.5, margin: [0, 2, 0, 0] } : '',
         (it.photos || []).length ? { columns: it.photos.slice(0, 3).map(ph => ({ image: ph, fit: [110, 85] })), columnGap: 6, margin: [0, 4, 0, 0] } : ''
       ], margin: [0, 0, 0, 10], unbreakable: true };
@@ -567,8 +577,8 @@ const Reports = (function () {
       const list = [];
       const short = diff.filter(i => i.var.qty < 0 || (i.var.qty === 0 && i.var.wgh < 0));
       const over = diff.filter(i => i.var.qty > 0 || (i.var.qty === 0 && i.var.wgh > 0));
-      if (short.length) list.push({ issue: `${short.length} dòng thiếu (${signed(Util.round(short.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Đối chiếu phiếu nhập/xuất, giải trình lý do, điều chỉnh sổ khi được duyệt', owner: 'Thủ kho + Kế toán', due: d(2) });
-      if (over.length) list.push({ issue: `${over.length} dòng thừa (${signed(Util.round(over.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Tìm phiếu nhập chưa ghi sổ, nhập bổ sung vào hệ thống', owner: 'Thủ kho + Kế toán', due: d(2) });
+      if (short.length) list.push({ issue: `${short.length} dòng thiếu (${signed(Util.round(short.reduce((a, i) => a + i.var.qty, 0)))} ${mainUnit}, ${signed(Util.round(short.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Đối chiếu phiếu nhập/xuất, giải trình lý do, điều chỉnh sổ khi được duyệt', owner: 'Thủ kho + Kế toán', due: d(2) });
+      if (over.length) list.push({ issue: `${over.length} dòng thừa (${signed(Util.round(over.reduce((a, i) => a + i.var.qty, 0)))} ${mainUnit}, ${signed(Util.round(over.reduce((a, i) => a + i.var.wgh, 0), 2))} kg)`, action: 'Tìm phiếu nhập chưa ghi sổ, nhập bổ sung vào hệ thống', owner: 'Thủ kho + Kế toán', due: d(2) });
       if (expired.length) list.push({ issue: `${expired.length} dòng hết hạn`, action: 'Để riêng hàng, lập biên bản xử lý hoặc hủy', owner: 'QA + Quản lý kho', due: d(1) });
       if (near.length) list.push({ issue: `${near.length} dòng sắp hết hạn`, action: 'Xuất trước hàng gần hết hạn, báo bộ phận bán hàng', owner: 'Quản lý kho', due: d(1) });
       if (uncounted.length) list.push({ issue: `${uncounted.length} dòng chưa kiểm`, action: 'Kiểm bổ sung, cập nhật biên bản', owner: 'Kế toán', due: d(1) });
