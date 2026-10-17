@@ -142,8 +142,10 @@
     setTitle('CPV SLH Kiểm Kê');
     const open = (await DB.all('sessions')).filter(s => s.status !== 'done').sort((a, b) => b.startedAt.localeCompare(a.startedAt));
     const canCount = Auth.can.count();
+    const pending = await pendingSessions();
     view().innerHTML = `
       <div class="hello">Xin chào <b>${E(user.name)}</b> <span class="tag">${E(Auth.ROLES[Auth.role()] || '')}</span> · Hôm nay: <b>${Util.vnDate(Util.today())}</b>${Cloud.enabled() ? ' · ☁ dữ liệu chung' : ''}</div>
+      ${pendingCard(pending)}
       ${canCount ? '<h3 class="section">Bạn đi kiểm gì?</h3>' : '<p class="muted small">Tài khoản chỉ xem: xem dashboard, lịch sử và file biên bản.</p>'}
       ${Object.entries(TYPES).filter(() => canCount).map(([k, t], i) => `
         <div class="card type-card click" data-type="${k}">
@@ -166,6 +168,7 @@
     $('[data-dash]').onclick = () => go('#dashboard');
     $$('[data-open]').forEach(b => b.onclick = () => go('#count/' + b.dataset.open));
     $$('[data-delopen]').forEach(b => b.onclick = () => deleteOpenSession(b.dataset.delopen, renderHome));
+    bindPendingCard(renderHome);
   }
 
   // Xóa phiên đang làm dở (kế toán và quản trị): xóa trên máy và dòng "đang kiểm" trên dữ liệu chung
@@ -1117,7 +1120,8 @@
           <input class="mt" placeholder="Ghi thêm (không bắt buộc)" value="${E(m.title)}">
         </div>
         <div class="row gap"><input class="mn" placeholder="Họ và tên" value="${E(m.name)}"><button class="btn small-btn mdel" title="Xóa">✕</button></div>
-        ${sigBox('m' + i, m.signature)}
+        <label class="absent-row small"><input type="checkbox" class="mabs" ${m.absent ? 'checked' : ''}> Không có mặt lúc kiểm (ký tay sau trên bản in)</label>
+        ${m.absent ? '<p class="muted small">Biên bản ký trên app ghi "Vắng mặt" ở ô này. Biên bản ký tay vẫn để trống chỗ ký như bình thường.</p>' : sigBox('m' + i, m.signature)}
       </div>`).join('');
     $$('#committee .member').forEach(el => {
       const m = s.committee[Number(el.dataset.i)];
@@ -1125,7 +1129,8 @@
       el.querySelector('.mt').oninput = e => { m.title = e.target.value; scheduleSave(); };
       el.querySelector('.mn').oninput = e => { m.name = e.target.value; scheduleSave(); };
       el.querySelector('.mdel').onclick = () => { if (confirm('Xóa thành viên này?')) { s.committee.splice(Number(el.dataset.i), 1); scheduleSave(); drawCommittee(s); } };
-      bindSig('m' + el.dataset.i, () => m.signature, v => { m.signature = v; });
+      el.querySelector('.mabs').onchange = e => { m.absent = e.target.checked; if (m.absent) m.signature = null; scheduleSave(); drawCommittee(s); };
+      if (!m.absent) bindSig('m' + el.dataset.i, () => m.signature, v => { m.signature = v; });
     });
   }
 
@@ -1137,11 +1142,13 @@
     }
     const members = s.committee.filter(m => m.name.trim());
     if (!members.length) return toast('Nhập tên ít nhất một người ký', 'err');
-    const unsigned = members.filter(m => !m.signature).map(m => m.name);
+    const unsigned = members.filter(m => !m.signature && !m.absent).map(m => m.name);
+    const absent = members.filter(m => m.absent).map(m => m.name);
     const todo = typeOf(s) === 'branch' ? Docs2.branchSummary(s).todo.length : s.items.filter(i => i.actualQty == null).length;
     let msg = typeOf(s) === 'branch' ? 'Kết thúc kiểm tra và khóa kết quả?' : 'Kết thúc kiểm kê và khóa số liệu?';
     if (todo) msg += typeOf(s) === 'branch' ? `\n- ${todo} chỉ tiêu chưa đánh giá.` : `\n- ${todo} dòng chưa kiểm.`;
     if (unsigned.length) msg += `\n- Chưa ký: ${unsigned.join(', ')}.`;
+    if (absent.length) msg += `\n- Vắng mặt (ký tay sau): ${absent.join(', ')}.`;
     if (!confirm(msg)) return;
     // Giữ cả chức danh chưa có tên để bản ký tay vẫn có chỗ ký
     s.committee = s.committee.filter(m => m.name.trim() || m.role.trim() || m.signature);
@@ -1174,7 +1181,7 @@
 
   // ---------- dữ liệu chung (GitHub riêng tư) ----------
   function cloudRecord(s) {
-    return Object.assign(summaryOf(s), { docNo: docNoOf(s), local: undefined, sourceFile: s.sourceFile || '' });
+    return Object.assign(summaryOf(s), { docNo: docNoOf(s), local: undefined, pending: undefined, sourceFile: s.sourceFile || '' });
   }
   // Gửi các phiên đã kết thúc đang chờ: file PDF/Excel + dòng lịch sử
   let flushing = null;
@@ -1183,6 +1190,8 @@
     if (flushing) return flushing;
     flushing = (async () => {
       let sent = 0, failed = 0;
+      // Lần kiểm đã kết thúc mà chưa có trên dữ liệu chung (vì lý do gì cũng vậy): đưa lại vào hàng chờ
+      (await pendingSessions()).forEach(s => Cloud.enqueue(s.id));
       for (const id of Cloud.queue()) {
         try {
           const s = await DB.get('sessions', id);
@@ -1191,18 +1200,53 @@
           if (s.status === 'done') {
             let files = (await DB.get('files', s.id) || {}).files;
             if (!files) { files = await buildFiles(s); await DB.put('files', { id: s.id, files }); }
+            rec.filesPending = false;
             await Cloud.upload(s, files, rec);
           } else await Cloud.saveHistory(rec);
           s.cloud = { at: new Date().toISOString(), files: rec.files || [] };
+          delete s.cloudError;
           await DB.put('sessions', s);
           if (current && current.id === s.id) current.cloud = s.cloud;
           Cloud.setQueue(Cloud.queue().filter(x => x !== id));
           sent++;
-        } catch (e) { console.warn('cloud', id, e); failed++; }
+        } catch (e) {
+          console.warn('cloud', id, e); failed++;
+          const s = await DB.get('sessions', id).catch(() => null);
+          if (s) {
+            s.cloudError = { at: new Date().toISOString(), msg: e.message }; await DB.put('sessions', s).catch(() => {});
+            // Gửi file lỗi nhưng còn mạng: báo lên lịch sử chung là "đã kiểm xong, chưa có file" để quản trị biết
+            if (s.status === 'done') { try { const rec = cloudRecord(s); delete rec.files; rec.filesPending = true; await Cloud.saveHistory(rec); } catch (e2) { /* không có mạng */ } }
+          }
+        }
       }
       return { sent, failed };
     })().finally(() => { flushing = null; });
     return flushing;
+  }
+
+  // Lần kiểm đã kết thúc trên máy này nhưng chưa gửi được (hoặc sửa lại sau lần gửi trước)
+  async function pendingSessions() {
+    return (await DB.all('sessions')).filter(s => s.status === 'done' && (!s.cloud || (s.finishedAt && s.cloud.at < s.finishedAt) || Cloud.queue().includes(s.id)));
+  }
+
+  // Thẻ trên trang đầu: các lần kiểm chưa lên dữ liệu chung, gửi tất cả bằng một nút
+  function pendingCard(list) {
+    if (!list.length || !Cloud.enabled()) return '';
+    return `<div class="card pending-card">
+      <h3>☁ ${list.length} lần kiểm chưa gửi lên dữ liệu chung</h3>
+      <p class="small">Máy khác chưa xem được các biên bản này. App tự gửi lại mỗi 2 phút khi có mạng, hoặc bấm gửi ngay.</p>
+      ${list.map(s => `<div class="li small"><b>${E(TYPES[typeOf(s)].name)}</b> · ${E(s.factory.name)} · ${Util.vnDate(s.countDate)} · ${E(s.user.name)}
+        ${s.cloudError ? `<div class="short">Lỗi lần gửi ${Util.vnDateTime(s.cloudError.at)}: ${E(s.cloudError.msg)}</div>` : ''}</div>`).join('')}
+      <button class="btn primary block" id="sendAll">⟳ Gửi tất cả ngay</button>
+    </div>`;
+  }
+  function bindPendingCard(after) {
+    if ($('#sendAll')) $('#sendAll').onclick = () => guard(async () => {
+      if (!navigator.onLine) throw new Error('Máy đang không có mạng');
+      const r = await flushCloud();
+      toast(r.failed ? `Đã gửi ${r.sent}, còn ${r.failed} lần chưa gửi được (xem lỗi bên dưới)` : `Đã gửi ${r.sent} lần kiểm lên dữ liệu chung`, r.failed ? 'err' : '');
+      after && after();
+    }, 'Đang gửi lên dữ liệu chung...');
   }
   // Ghi lịch sử "đang kiểm" ngay khi bắt đầu để dashboard chung thấy ai đang đi kiểm
   function cloudTouch(s) {
@@ -1214,7 +1258,8 @@
     if (!Cloud.enabled()) return `<div class="card small muted">Chưa bật lưu dữ liệu chung: file và lịch sử chỉ nằm trên máy này. Quản trị viên vào ⚙ Cài đặt → <b>Dữ liệu chung</b> để bật.</div>`;
     const pending = Cloud.queue().includes(s.id) || !s.cloud;
     return `<div class="card small ${pending ? 'warn-card' : 'ok-card'}">${pending
-      ? `☁ Chưa lưu lên dữ liệu chung. <button class="btn small-btn" id="cloudNow">Gửi ngay</button>`
+      ? `☁ Chưa lưu lên dữ liệu chung, máy khác chưa xem được. App tự gửi lại khi có mạng. <button class="btn small-btn" id="cloudNow">Gửi ngay</button>
+        ${s.cloudError ? `<div class="short">Lỗi lần gửi ${Util.vnDateTime(s.cloudError.at)}: ${E(s.cloudError.msg)}</div>` : ''}`
       : `☁ Đã lưu ${(s.cloud && s.cloud.files || []).length} file lên dữ liệu chung${s.cloud ? ' lúc ' + Util.vnDateTime(s.cloud.at) : ''}. Máy tính đồng bộ tự đưa file vào OneDrive › Apps Kiem Kho › Output, máy khác xem được trong Dashboard.
         <br><button class="btn small-btn" id="cloudNow">⟳ Gửi lại file</button> <span class="muted">(khi máy khác báo không mở được file)</span>`}</div>`;
   }
@@ -1595,7 +1640,8 @@
     }
     return {
       id: s.id, type, factory: s.factory.name, factoryCode: s.factory.code, date: s.countDate, user: s.user.name, email: s.user.email,
-      start: (s.checkIn && s.checkIn.time) || s.startedAt, end: (s.checkOut && s.checkOut.time) || s.finishedAt, status: s.status, stats, local: true
+      start: (s.checkIn && s.checkIn.time) || s.startedAt, end: (s.checkOut && s.checkOut.time) || s.finishedAt, status: s.status, stats, local: true,
+      pending: s.status === 'done' && (!s.cloud || (s.finishedAt && s.cloud.at < s.finishedAt))
     };
   }
   function externalHistory() { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch (e) { return []; } }
@@ -1769,7 +1815,8 @@
               <div class="ev-top"><span class="tchip" style="--c:${C[h.type]}">${TYPES[h.type].icon} ${short(h.type)}</span><span class="pill ${h.status === 'done' ? 'done' : 'run'}">${h.status === 'done' ? 'Hoàn tất' : 'Đang kiểm'}</span></div>
               <div class="ev-title">${E(h.factory)}</div>
               <div class="ev-meta"><span class="ava sm">${E(initials(h.user))}</span>${E(h.user)}${dur(h.start, h.end) ? ` · ⏱ ${dur(h.start, h.end)}` : ''}${h.docNo ? ` · ${E(h.docNo)}` : ''}</div>
-              <div class="ev-meta">${res}</div>
+              <div class="ev-meta">${res}${h.pending ? ' <span class="pill run">☁ chưa gửi lên, máy khác chưa xem được</span>' : h.filesPending ? ' <span class="pill run">☁ máy người kiểm chưa gửi được file</span>'
+                : h.status !== 'done' && !h.local && h.start && Date.now() - new Date(h.start) > 12 * 3600e3 ? ' <span class="pill run">quá 12 giờ: có thể đã xong nhưng máy người kiểm chưa gửi lên</span>' : ''}</div>
               <div class="ev-act">
                 ${h.local ? `<button class="btn small-btn" data-open="${h.id}" data-st="${h.status}">${h.status === 'done' ? 'Mở kết quả' : 'Tiếp tục'}</button>` : ''}
                 ${!h.local ? pdfs.map(f => `<button class="btn small-btn" data-cf="${E(f.path)}" data-cn="${E(f.name)}">📄 ${E(FILE_LABELS[f.key] || f.name)}</button>`).join('')
@@ -2229,6 +2276,17 @@
     route();
     syncCloud(false);
     window.addEventListener('online', () => syncCloud(false));
+    // Tự gửi lại các lần kiểm chưa lên dữ liệu chung: mỗi 2 phút và mỗi khi mở lại app
+    const autoSend = async () => {
+      if (!Cloud.enabled() || !navigator.onLine || !Auth.currentUser() || !(await pendingSessions()).length) return;
+      const r = await flushCloud();
+      if (r.sent) {
+        toast(`Đã tự gửi ${r.sent} lần kiểm lên dữ liệu chung`);
+        if (['', '#home'].includes(location.hash)) renderHome();
+      }
+    };
+    setInterval(autoSend, 2 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoSend(); });
     if (Util.inAppBrowser) toast('Đang mở trong Zalo/Facebook/Teams: hãy mở bằng Chrome/Safari để tải và chia sẻ được file', 'err');
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       const hadController = !!navigator.serviceWorker.controller;

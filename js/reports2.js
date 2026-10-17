@@ -54,7 +54,9 @@ const Docs2 = (function () {
   function signRow(people, withSig) {
     const cell = p => ({
       width: '*', alignment: 'center', stack: [
-        withSig && p.signature ? { image: p.signature, fit: [100, 42], margin: [0, 0, 0, 2] } : { text: ' ', margin: [0, 20, 0, 20] },
+        withSig && p.signature ? { image: p.signature, fit: [100, 42], margin: [0, 0, 0, 2] }
+          : withSig && p.absent ? { text: 'Vắng mặt', italics: true, color: '#777', fontSize: 8, margin: [0, 20, 0, 20] }
+          : { text: ' ', margin: [0, 20, 0, 20] },
         { text: p.name || ' ', fontSize: 8.5 },
         { text: p.role || '', bold: true, fontSize: 8.5 }
       ]

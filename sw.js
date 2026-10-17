@@ -1,6 +1,6 @@
 // Service worker: lưu toàn bộ app trên máy để chạy không cần mạng.
 // Có mạng thì lấy bản mới nhất từ máy chủ (để điện thoại không bị kẹt ở bản cũ), mất mạng thì dùng bản đã lưu.
-const CACHE = 'kiem-kho-v2.6.3';
+const CACHE = 'kiem-kho-v2.6.4';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'assets/factory-default.jpg', 'assets/logo.png', 'assets/cp-mark.png',

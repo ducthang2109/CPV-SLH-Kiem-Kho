@@ -82,7 +82,9 @@ const Reports = (function () {
     const people = s.committee.filter(p => p.name || p.role);
     const cell = p => ({
       width: '*', alignment: 'center', stack: [
-        withSignatures && p.signature ? { image: p.signature, fit: [105, 46], margin: [0, 0, 0, 2] } : { text: ' ', margin: [0, 22, 0, 22] },
+        withSignatures && p.signature ? { image: p.signature, fit: [105, 46], margin: [0, 0, 0, 2] }
+          : withSignatures && p.absent ? { text: 'Vắng mặt', italics: true, color: '#777', fontSize: 8, margin: [0, 22, 0, 22] }
+          : { text: ' ', margin: [0, 22, 0, 22] },
         { text: p.name || ' ', fontSize: 8 },
         { text: '..................................................', fontSize: 7, color: '#555' },
         { text: p.role || '', bold: true, italics: true, fontSize: 8 },
